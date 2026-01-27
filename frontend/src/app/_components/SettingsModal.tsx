@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import { useConfig } from "@/contexts/ConfigContext";
 import { useRecordingState } from "@/contexts/RecordingStateContext";
 import { invoke } from '@tauri-apps/api/core';
-import { RecordingPreferences } from '@/components/RecordingSettings';
+import { configService, RecordingPreferences } from '@/services/configService';
 
 type modalType = "modelSettings" | "deviceSettings" | "languageSettings" | "modelSelector" | "errorAlert" | "chunkDropWarning";
 
@@ -67,7 +67,7 @@ export function SettingsModals({
     
     // Save to backend
     try {
-      const prefs = await invoke<RecordingPreferences>('get_recording_preferences');
+      const prefs = await configService.getRecordingPreferences();
       
       const updatedPrefs = {
         ...prefs,

@@ -5,14 +5,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { DeviceSelection, SelectedDevices } from '@/components/DeviceSelection';
 import Analytics from '@/lib/analytics';
 import { toast } from 'sonner';
-
-export interface RecordingPreferences {
-  save_folder: string;
-  auto_save: boolean;
-  file_format: string;
-  preferred_mic_device: string | null;
-  preferred_system_device: string | null;
-}
+import { RecordingPreferences } from '@/services/configService';
 
 interface RecordingSettingsProps {
   onSave?: (preferences: RecordingPreferences) => void;
