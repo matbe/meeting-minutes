@@ -1,12 +1,13 @@
 import { ModelConfig } from "@/components/ModelSettingsModal";
 import { PreferenceSettings } from "@/components/PreferenceSettings";
-import { DeviceSelection } from "@/components/DeviceSelection";
+import { DeviceSelection, SelectedDevices } from "@/components/DeviceSelection";
 import { LanguageSelection } from "@/components/LanguageSelection";
 import { TranscriptSettings } from "@/components/TranscriptSettings";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { toast } from "sonner";
 import { useConfig } from "@/contexts/ConfigContext";
 import { useRecordingState } from "@/contexts/RecordingStateContext";
+import { invoke } from '@tauri-apps/api/core';
 
 type modalType = "modelSettings" | "deviceSettings" | "languageSettings" | "modelSelector" | "errorAlert" | "chunkDropWarning";
 
@@ -57,6 +58,36 @@ export function SettingsModals({
   } = useConfig();
 
   const { isRecording } = useRecordingState();
+
+  // Handler to save device changes to backend
+  const handleDeviceChange = async (devices: SelectedDevices) => {
+    // Update React state
+    setSelectedDevices(devices);
+    
+    // Save to backend
+    try {
+      const prefs = await invoke<{ 
+        save_folder: string; 
+        auto_save: boolean; 
+        file_format: string;
+        preferred_mic_device: string | null;
+        preferred_system_device: string | null;
+      }>('get_recording_preferences');
+      
+      const updatedPrefs = {
+        ...prefs,
+        preferred_mic_device: devices.micDevice,
+        preferred_system_device: devices.systemDevice
+      };
+      
+      await invoke('set_recording_preferences', { preferences: updatedPrefs });
+      console.log('[SettingsModal] Saved device preferences:', updatedPrefs);
+    } catch (error) {
+      console.error('[SettingsModal] Failed to save device preferences:', error);
+      toast.error('Failed to save device preferences');
+    }
+  };
+
 
   return <>
     {/* Legacy Settings Modal */}
@@ -183,7 +214,7 @@ export function SettingsModals({
 
           <DeviceSelection
             selectedDevices={selectedDevices}
-            onDeviceChange={setSelectedDevices}
+            onDeviceChange={handleDeviceChange}
             disabled={isRecording}
           />
 
