@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { useConfig } from "@/contexts/ConfigContext";
 import { useRecordingState } from "@/contexts/RecordingStateContext";
 import { invoke } from '@tauri-apps/api/core';
+import { RecordingPreferences } from '@/components/RecordingSettings';
 
 type modalType = "modelSettings" | "deviceSettings" | "languageSettings" | "modelSelector" | "errorAlert" | "chunkDropWarning";
 
@@ -66,13 +67,7 @@ export function SettingsModals({
     
     // Save to backend
     try {
-      const prefs = await invoke<{ 
-        save_folder: string; 
-        auto_save: boolean; 
-        file_format: string;
-        preferred_mic_device: string | null;
-        preferred_system_device: string | null;
-      }>('get_recording_preferences');
+      const prefs = await invoke<RecordingPreferences>('get_recording_preferences');
       
       const updatedPrefs = {
         ...prefs,
@@ -82,6 +77,13 @@ export function SettingsModals({
       
       await invoke('set_recording_preferences', { preferences: updatedPrefs });
       console.log('[SettingsModal] Saved device preferences:', updatedPrefs);
+      
+      // Show success toast with device details
+      const micDevice = devices.micDevice || 'Default';
+      const systemDevice = devices.systemDevice || 'Default';
+      toast.success("Device preferences saved", {
+        description: `Microphone: ${micDevice}, System Audio: ${systemDevice}`
+      });
     } catch (error) {
       console.error('[SettingsModal] Failed to save device preferences:', error);
       toast.error('Failed to save device preferences');
