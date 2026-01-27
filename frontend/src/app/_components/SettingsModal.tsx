@@ -7,7 +7,6 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { toast } from "sonner";
 import { useConfig } from "@/contexts/ConfigContext";
 import { useRecordingState } from "@/contexts/RecordingStateContext";
-import { invoke } from '@tauri-apps/api/core';
 import { configService, RecordingPreferences } from '@/services/configService';
 
 type modalType = "modelSettings" | "deviceSettings" | "languageSettings" | "modelSelector" | "errorAlert" | "chunkDropWarning";
@@ -62,10 +61,7 @@ export function SettingsModals({
 
   // Handler to save device changes to backend
   const handleDeviceChange = async (devices: SelectedDevices) => {
-    // Update React state
-    setSelectedDevices(devices);
-    
-    // Save to backend
+    // Save to backend first
     try {
       const prefs = await configService.getRecordingPreferences();
       
@@ -75,8 +71,11 @@ export function SettingsModals({
         preferred_system_device: devices.systemDevice
       };
       
-      await invoke('set_recording_preferences', { preferences: updatedPrefs });
+      await configService.setRecordingPreferences(updatedPrefs);
       console.log('[SettingsModal] Saved device preferences:', updatedPrefs);
+      
+      // Update React state only after successful save
+      setSelectedDevices(devices);
       
       // Show success toast with device details
       const micDevice = devices.micDevice || 'Default';

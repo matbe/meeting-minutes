@@ -74,6 +74,15 @@ export class ConfigService {
   }
 
   /**
+   * Save audio device preferences
+   * @param preferences - RecordingPreferences to save
+   * @returns Promise that resolves when preferences are saved
+   */
+  async setRecordingPreferences(preferences: RecordingPreferences): Promise<void> {
+    return invoke<void>('set_recording_preferences', { preferences });
+  }
+
+  /**
    * Get saved language preference
    * @returns Promise with language code string
    */
