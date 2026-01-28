@@ -128,3 +128,57 @@ pub struct TranscriptSetting {
     #[serde(rename = "openaiApiKey")]
     pub openai_api_key: Option<String>,
 }
+
+/// A vocabulary set containing custom terms for transcription improvement
+#[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
+pub struct VocabularySet {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub is_default: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// A vocabulary entry representing a term with its common misrecognitions
+#[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
+pub struct VocabularyEntry {
+    pub id: String,
+    pub vocabulary_set_id: String,
+    pub term: String,
+    pub alternatives: Option<String>,  // JSON array of alternative spellings/misrecognitions
+    pub category: Option<String>,
+    pub pronunciation: Option<String>,
+    pub enabled: bool,
+}
+
+/// Parsed vocabulary entry with alternatives as a Vec for easier use
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VocabularyEntryParsed {
+    pub id: String,
+    pub vocabulary_set_id: String,
+    pub term: String,
+    pub alternatives: Vec<String>,
+    pub category: Option<String>,
+    pub pronunciation: Option<String>,
+    pub enabled: bool,
+}
+
+impl From<VocabularyEntry> for VocabularyEntryParsed {
+    fn from(entry: VocabularyEntry) -> Self {
+        let alternatives = entry.alternatives
+            .as_ref()
+            .and_then(|json| serde_json::from_str::<Vec<String>>(json).ok())
+            .unwrap_or_default();
+        
+        VocabularyEntryParsed {
+            id: entry.id,
+            vocabulary_set_id: entry.vocabulary_set_id,
+            term: entry.term,
+            alternatives,
+            category: entry.category,
+            pronunciation: entry.pronunciation,
+            enabled: entry.enabled,
+        }
+    }
+}

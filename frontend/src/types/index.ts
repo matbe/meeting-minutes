@@ -108,3 +108,39 @@ export interface TranscriptSegmentData {
   text: string;
   confidence?: number;
 }
+
+// ===== VOCABULARY TYPES =====
+
+/**
+ * A vocabulary entry representing a term with its common misrecognitions.
+ * Used for improving transcription accuracy by providing hints and post-processing corrections.
+ */
+export interface VocabularyEntry {
+  id: string;
+  vocabulary_set_id: string;
+  term: string;              // Correct spelling: "Kubernetes"
+  alternatives: string[];    // Common misrecognitions: ["Cooper Netties", "Kuber Netties"]
+  category?: string;         // "Technology", "Product", "Person", "Company", etc.
+  pronunciation?: string;    // Optional phonetic hint
+  enabled: boolean;
+}
+
+/**
+ * A vocabulary set containing custom terms for transcription improvement.
+ * Users can create multiple sets for different contexts (e.g., "Tech Terms", "Company Glossary").
+ */
+export interface VocabularySet {
+  id: string;
+  name: string;              // "Tech Terms", "Company Glossary"
+  description?: string;
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * A vocabulary set with entry count for display purposes.
+ */
+export interface VocabularySetWithCount extends VocabularySet {
+  entry_count: number;
+}

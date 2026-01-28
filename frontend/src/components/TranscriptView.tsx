@@ -1,11 +1,13 @@
 'use client';
 
-import { Transcript } from '@/types';
-import { useEffect, useRef, useState } from 'react';
+import { Transcript, VocabularyEntry } from '@/types';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { ConfidenceIndicator } from './ConfidenceIndicator';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { RecordingStatusBar } from './RecordingStatusBar';
 import { motion, AnimatePresence } from 'framer-motion';
+import { invoke } from '@tauri-apps/api/core';
+import { correctTranscript } from '@/lib/vocabularyCorrection';
 
 interface TranscriptViewProps {
   transcripts: Transcript[];
@@ -125,6 +127,34 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
   } | null>(null);
   const streamingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastStreamedIdRef = useRef<string | null>(null); // Track which transcript we've streamed
+
+  // Vocabulary correction state
+  const [vocabulary, setVocabulary] = useState<VocabularyEntry[]>([]);
+  const vocabularyLoadedRef = useRef(false);
+
+  // Load vocabulary for correction
+  const loadVocabulary = useCallback(async () => {
+    if (vocabularyLoadedRef.current) return;
+    
+    try {
+      const entries = await invoke<VocabularyEntry[]>('get_vocabulary_for_correction');
+      setVocabulary(entries);
+      vocabularyLoadedRef.current = true;
+    } catch (err) {
+      console.error('Failed to load vocabulary for correction:', err);
+    }
+  }, []);
+
+  // Load vocabulary on mount
+  useEffect(() => {
+    loadVocabulary();
+  }, [loadVocabulary]);
+
+  // Apply vocabulary correction to text
+  const applyVocabularyCorrection = useCallback((text: string): string => {
+    if (vocabulary.length === 0) return text;
+    return correctTranscript(text, vocabulary);
+  }, [vocabulary]);
 
   // Load preference for showing confidence indicator
   const [showConfidence, setShowConfidence] = useState<boolean>(() => {
@@ -264,13 +294,16 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
         const isStreaming = streamingTranscript?.id === transcript.id;
         const textToShow = isStreaming ? streamingTranscript.visibleText : transcript.text;
         // Clean up text for display - remove repetitions and filler words
-        const filteredText = cleanStopWords(textToShow);
+        const cleanedText = cleanStopWords(textToShow);
+        // Apply vocabulary correction to fix common misrecognitions
+        const filteredText = applyVocabularyCorrection(cleanedText);
         // Show [Silence] ONLY if the ORIGINAL transcript was empty (not just after filtering)
         const originalWasEmpty = transcript.text.trim() === '';
         const displayText = originalWasEmpty && !isStreaming ? '[Silence]' : filteredText;
 
         // Sizer text: use cleaned version for proper sizing, fallback to [Silence] only if original was empty
-        const sizerText = cleanStopWords(isStreaming ? streamingTranscript.fullText : transcript.text)
+        const sizerTextCleaned = cleanStopWords(isStreaming ? streamingTranscript.fullText : transcript.text);
+        const sizerText = applyVocabularyCorrection(sizerTextCleaned)
           || (originalWasEmpty && !isStreaming ? '[Silence]' : '');
 
         return (
