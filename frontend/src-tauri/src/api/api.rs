@@ -1379,3 +1379,42 @@ pub async fn api_test_custom_openai_connection<R: Runtime>(
         }
     }
 }
+
+/// Get the audio file path for a meeting folder
+/// Searches for .mp4 or .wav files in the meeting folder and returns the first match
+#[tauri::command]
+pub async fn get_meeting_audio_path(meeting_folder: String) -> Result<Option<String>, String> {
+    log_debug!("Looking for audio file in folder: {}", meeting_folder);
+
+    let folder_path = std::path::Path::new(&meeting_folder);
+
+    if !folder_path.exists() {
+        log_warn!("Meeting folder does not exist: {}", meeting_folder);
+        return Ok(None);
+    }
+
+    // Look for audio.mp4 first (the default name used by the recording system)
+    let audio_mp4 = folder_path.join("audio.mp4");
+    if audio_mp4.exists() {
+        log_debug!("Found audio.mp4 at: {:?}", audio_mp4);
+        return Ok(Some(audio_mp4.to_string_lossy().to_string()));
+    }
+
+    // Then look for any .mp4 or .wav file
+    let entries = std::fs::read_dir(folder_path)
+        .map_err(|e| format!("Failed to read meeting folder: {}", e))?;
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if let Some(ext) = path.extension() {
+            let ext_lower = ext.to_string_lossy().to_lowercase();
+            if ext_lower == "mp4" || ext_lower == "wav" {
+                log_debug!("Found audio file: {:?}", path);
+                return Ok(Some(path.to_string_lossy().to_string()));
+            }
+        }
+    }
+
+    log_debug!("No audio file found in folder: {}", meeting_folder);
+    Ok(None)
+}
