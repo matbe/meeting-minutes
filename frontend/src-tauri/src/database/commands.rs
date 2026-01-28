@@ -221,22 +221,38 @@ pub async fn initialize_fresh_database(app: AppHandle) -> Result<(), String> {
 
 /// Get the database directory path
 #[tauri::command]
+/// Get the database directory path (respecting custom path if set)
+#[tauri::command]
 pub async fn get_database_directory(app: AppHandle) -> Result<String, String> {
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
-
-    Ok(app_data_dir.to_string_lossy().to_string())
+    // Try to get custom path from storage preferences
+    match crate::storage_preferences::get_database_directory_path(&app).await {
+        Ok(path) => Ok(path.to_string_lossy().to_string()),
+        Err(e) => {
+            // Fallback to default app data directory
+            log::warn!("Failed to get custom database path, using default: {}", e);
+            let app_data_dir = app
+                .path()
+                .app_data_dir()
+                .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+            Ok(app_data_dir.to_string_lossy().to_string())
+        }
+    }
 }
 
 /// Open the database folder in the system file explorer
 #[tauri::command]
 pub async fn open_database_folder(app: AppHandle) -> Result<(), String> {
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+    // Get the effective database directory (custom or default)
+    let app_data_dir = match crate::storage_preferences::get_database_directory_path(&app).await {
+        Ok(path) => path,
+        Err(e) => {
+            log::warn!("Failed to get custom database path, using default: {}", e);
+            app
+                .path()
+                .app_data_dir()
+                .map_err(|e| format!("Failed to get app data dir: {}", e))?
+        }
+    };
 
     // Ensure directory exists before trying to open it
     if !app_data_dir.exists() {

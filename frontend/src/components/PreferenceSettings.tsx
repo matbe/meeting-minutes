@@ -175,17 +175,42 @@ export function PreferenceSettings() {
             console.error('Failed to update recording preferences:', error);
             alert('Failed to update recording path. Please try again.');
           }
-        } else {
-          // For database and models, show a message that restart is required
-          alert(`${folderType === 'database' ? 'Database' : 'Models'} path will be changed to:\n${selectedPath}\n\nPlease restart the application for this change to take effect.\n\nNote: Existing data will not be automatically moved.`);
-          
-          // Track path change
-          await Analytics.track('storage_path_changed', {
-            folder_type: folderType
-          });
-          
-          // TODO: Implement persistent storage for database and models paths
-          console.warn(`Path change for ${folderType} requires implementation of persistent storage`);
+        } else if (folderType === 'database') {
+          // For database, use the new command
+          try {
+            await invoke('set_database_path', { path: selectedPath });
+            
+            // Reload preferences to update UI
+            await loadPreferences();
+
+            // Track path change
+            await Analytics.track('storage_path_changed', {
+              folder_type: folderType
+            });
+
+            alert(`Database path updated successfully to:\n${selectedPath}\n\nPlease restart the application for this change to take effect.\n\nNote: Existing database files will not be automatically moved. You may need to manually copy them to the new location.`);
+          } catch (error) {
+            console.error('Failed to update database path:', error);
+            alert('Failed to update database path. Please try again.');
+          }
+        } else if (folderType === 'models') {
+          // For models, use the new command
+          try {
+            await invoke('set_models_path', { path: selectedPath });
+            
+            // Reload preferences to update UI
+            await loadPreferences();
+
+            // Track path change
+            await Analytics.track('storage_path_changed', {
+              folder_type: folderType
+            });
+
+            alert(`Models path updated successfully to:\n${selectedPath}\n\nPlease restart the application for this change to take effect.\n\nNote: Existing model files will not be automatically moved. You may need to manually copy them to the new location.`);
+          } catch (error) {
+            console.error('Failed to update models path:', error);
+            alert('Failed to update models path. Please try again.');
+          }
         }
       } else {
         console.log('User cancelled folder selection');
