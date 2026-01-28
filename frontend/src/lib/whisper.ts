@@ -91,7 +91,7 @@ export const MODEL_CONFIGS: Record<string, Partial<ModelInfo>> = {
   // Q5_0 quantized models (balanced speed/accuracy)
   'large-v3-q5_0': {
     description: 'Quantized large model, best balance of speed and accuracy.',
-    size_mb: 1000,
+    size_mb: 1050,
     accuracy: 'High',
     speed: 'Medium'
   },

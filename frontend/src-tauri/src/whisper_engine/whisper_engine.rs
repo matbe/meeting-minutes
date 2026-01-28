@@ -187,7 +187,7 @@ impl WhisperEngine {
             ("large-v3-turbo-q5_0", "ggml-large-v3-turbo-q5_0.bin", 574, "High", "Medium", "Quantized large model, best balance"),
             ("large-v3-q5_0", "ggml-large-v3-q5_0.bin", 1050, "High", "Slow", "Quantized large model, high accuracy"),
 
-            // Q8_0 quantized models (higher quality, slower than q5_0)
+            // Q8_0 quantized models (higher quality than q5_0, similar speed)
             ("tiny-q8_0", "ggml-tiny-q8_0.bin", 42, "Decent", "Very Fast", "Higher quality quantized tiny model"),
             ("base-q8_0", "ggml-base-q8_0.bin", 148, "Good", "Fast", "Higher quality quantized base model"),
             ("small-q8_0", "ggml-small-q8_0.bin", 488, "Good", "Medium", "Higher quality quantized small model"),
@@ -241,7 +241,7 @@ impl WhisperEngine {
                                         ModelStatus::Downloading { progress: *progress }
                                     }
                                     _ => {
-                                        log::warn!("Model file {} has unexpected size: {} MB (expected: {} MB ±30%)",
+                                        log::warn!("Model file {} has unexpected size: {} MB (expected: {} MB, range: 70%-150%)",
                                                  filename, file_size_mb, size_mb);
                                         ModelStatus::Corrupted {
                                             file_size: file_size_bytes,
@@ -250,7 +250,7 @@ impl WhisperEngine {
                                     }
                                 }
                             } else {
-                                log::warn!("Model file {} has unexpected size: {} MB (expected: {} MB ±30%)",
+                                log::warn!("Model file {} has unexpected size: {} MB (expected: {} MB, range: 70%-150%)",
                                          filename, file_size_mb, size_mb);
                                 ModelStatus::Corrupted {
                                     file_size: file_size_bytes,

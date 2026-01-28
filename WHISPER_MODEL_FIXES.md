@@ -11,7 +11,7 @@
 
 The `/blob/` endpoint returns the HTML page for viewing the file, while `/resolve/` returns the actual binary file.
 
-**Fix**: Updated the URL in `frontend/src-tauri/src/whisper_engine/whisper_engine.rs` (line 950)
+**Fix**: Updated the URL in `frontend/src-tauri/src/whisper_engine/whisper_engine.rs` (line 970)
 
 ### 2. Model Validation Too Strict
 **Problem**: Models like `medium-q5_0` would download successfully but then show "Delete" and "Re-download" options when returning to the settings page.
