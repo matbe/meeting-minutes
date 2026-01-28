@@ -183,17 +183,9 @@ impl WhisperEngine {
             ("tiny-q5_0", "ggml-tiny-q5_0.bin", 26, "Decent", "Very Fast", "Quantized tiny model, ~50% faster processing"),
             ("base-q5_0", "ggml-base-q5_0.bin", 85, "Good", "Fast", "Quantized base model, good speed/accuracy balance"),
             ("small-q5_0", "ggml-small-q5_0.bin", 280, "Good", "Fast", "Quantized small model, faster than f16 version"),
-            ("medium-q5_0", "ggml-medium-q5_0.bin", 852, "High", "Medium", "Quantized medium model, professional quality"),
+            ("medium-q5_0", "ggml-medium-q5_0.bin", 514, "High", "Medium", "Quantized medium model, professional quality"),
             ("large-v3-turbo-q5_0", "ggml-large-v3-turbo-q5_0.bin", 574, "High", "Medium", "Quantized large model, best balance"),
             ("large-v3-q5_0", "ggml-large-v3-q5_0.bin", 1050, "High", "Slow", "Quantized large model, high accuracy"),
-
-            // Q8_0 quantized models (higher quality than q5_0, similar speed)
-            ("tiny-q8_0", "ggml-tiny-q8_0.bin", 42, "Decent", "Very Fast", "Higher quality quantized tiny model"),
-            ("base-q8_0", "ggml-base-q8_0.bin", 148, "Good", "Fast", "Higher quality quantized base model"),
-            ("small-q8_0", "ggml-small-q8_0.bin", 488, "Good", "Medium", "Higher quality quantized small model"),
-            ("medium-q8_0", "ggml-medium-q8_0.bin", 1485, "High", "Slow", "Higher quality quantized medium model"),
-            ("large-v3-turbo-q8_0", "ggml-large-v3-turbo-q8_0.bin", 843, "High", "Medium", "Higher quality quantized turbo model"),
-            ("large-v3-q8_0", "ggml-large-v3-q8_0.bin", 2997, "High", "Slow", "Higher quality quantized large model"),
 
            ];
         
@@ -205,24 +197,15 @@ impl WhisperEngine {
                     Ok(metadata) => {
                         let file_size_bytes = metadata.len();
                         let file_size_mb = file_size_bytes / (1024 * 1024);
-                        // More lenient size check: allow 70% to 150% of expected size
-                        // This accounts for:
-                        // - Compression variations between model versions
-                        // - Rounding differences in size calculations
-                        // - Metadata and header differences
-                        let expected_min_size_mb = (size_mb as f64 * 0.7) as u64;
-                        let expected_max_size_mb = (size_mb as f64 * 1.5) as u64;
+                        let expected_min_size_mb = (size_mb as f64 * 0.9) as u64; // Allow 90% of expected size as minimum for more accurate corruption detection
 
-                        if file_size_mb >= expected_min_size_mb && file_size_mb <= expected_max_size_mb && file_size_mb > 1 {
-                            // File size looks reasonable, validate it's a proper GGML file
+                        if file_size_mb >= expected_min_size_mb && file_size_mb > 1 {
+                            // File size looks good, but let's also check if it's a valid GGML file
                             match self.validate_model_file(&model_path).await {
-                                Ok(_) => {
-                                    log::debug!("Model {} validated successfully ({} MB)", name, file_size_mb);
-                                    ModelStatus::Available
-                                },
-                                Err(e) => {
-                                    log::warn!("Model file {} has reasonable size but failed validation: {}",
-                                             filename, e);
+                                Ok(_) => ModelStatus::Available,
+                                Err(_) => {
+                                    log::warn!("Model file {} has correct size but appears corrupted (failed validation)",
+                                             filename);
                                     ModelStatus::Corrupted {
                                         file_size: file_size_bytes,
                                         expected_min_size: (expected_min_size_mb * 1024 * 1024) as u64
@@ -230,7 +213,7 @@ impl WhisperEngine {
                                 }
                             }
                         } else if file_size_mb > 0 {
-                            // File exists but is outside the expected size range
+                            // File exists but is smaller than expected
                             // Check if this model is currently being downloaded
                             let models_guard = self.available_models.read().await;
                             if let Some(existing_model) = models_guard.get(name) {
@@ -241,7 +224,7 @@ impl WhisperEngine {
                                         ModelStatus::Downloading { progress: *progress }
                                     }
                                     _ => {
-                                        log::warn!("Model file {} has unexpected size: {} MB (expected: {} MB, range: 70%-150%)",
+                                        log::warn!("Model file {} exists but is corrupted ({} MB, expected ~{} MB)",
                                                  filename, file_size_mb, size_mb);
                                         ModelStatus::Corrupted {
                                             file_size: file_size_bytes,
@@ -250,7 +233,7 @@ impl WhisperEngine {
                                     }
                                 }
                             } else {
-                                log::warn!("Model file {} has unexpected size: {} MB (expected: {} MB, range: 70%-150%)",
+                                log::warn!("Model file {} exists but is corrupted ({} MB, expected ~{} MB)",
                                          filename, file_size_mb, size_mb);
                                 ModelStatus::Corrupted {
                                     file_size: file_size_bytes,
@@ -962,21 +945,11 @@ impl WhisperEngine {
             "large-v3-turbo" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin",
             "large-v3" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin",
             
-            // Q5_0 quantized models (balanced speed/accuracy)
-            "tiny-q5_0" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny-q5_0.bin",
-            "base-q5_0" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base-q5_0.bin",
             "small-q5_0" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_0.bin",
             "medium-q5_0" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium-q5_0.bin",
             "large-v3-turbo-q5_0" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin",
             "large-v3-q5_0" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-q5_0.bin",
-            
-            // Q8_0 quantized models (higher quality)
-            "tiny-q8_0" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny-q8_0.bin",
-            "base-q8_0" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base-q8_0.bin",
-            "small-q8_0" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q8_0.bin",
-            "medium-q8_0" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium-q8_0.bin",
-            "large-v3-turbo-q8_0" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q8_0.bin",
-            "large-v3-q8_0" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-q8_0.bin",
+            // Quantized int8 models
             
             _ => return Err(anyhow!("Unsupported model: {}", model_name))
         };
