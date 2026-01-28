@@ -219,8 +219,6 @@ pub async fn initialize_fresh_database(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Get the database directory path
-#[tauri::command]
 /// Get the database directory path (respecting custom path if set)
 #[tauri::command]
 pub async fn get_database_directory(app: AppHandle) -> Result<String, String> {

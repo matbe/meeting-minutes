@@ -158,14 +158,14 @@ pub async fn set_database_path<R: Runtime>(
 ) -> Result<(), String> {
     let path_buf = PathBuf::from(&path);
     
-    // Validate that the path exists and is a directory
+    // Validate path and create if necessary
+    if path_buf.exists() && !path_buf.is_dir() {
+        return Err("Selected path is not a directory".to_string());
+    }
+    
     if !path_buf.exists() {
         std::fs::create_dir_all(&path_buf)
             .map_err(|e| format!("Failed to create directory: {}", e))?;
-    }
-    
-    if !path_buf.is_dir() {
-        return Err("Selected path is not a directory".to_string());
     }
     
     // Load current preferences
@@ -192,14 +192,14 @@ pub async fn set_models_path<R: Runtime>(
 ) -> Result<(), String> {
     let path_buf = PathBuf::from(&path);
     
-    // Validate that the path exists and is a directory
+    // Validate path and create if necessary
+    if path_buf.exists() && !path_buf.is_dir() {
+        return Err("Selected path is not a directory".to_string());
+    }
+    
     if !path_buf.exists() {
         std::fs::create_dir_all(&path_buf)
             .map_err(|e| format!("Failed to create directory: {}", e))?;
-    }
-    
-    if !path_buf.is_dir() {
-        return Err("Selected path is not a directory".to_string());
     }
     
     // Load current preferences

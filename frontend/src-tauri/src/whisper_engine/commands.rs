@@ -347,7 +347,6 @@ pub async fn whisper_transcribe_audio(audio_data: Vec<f32>) -> Result<String, St
     }
 }
 
-#[command]
 /// Get the models directory path (respecting custom path if set)
 #[command]
 pub async fn whisper_get_models_directory(app: AppHandle) -> Result<String, String> {
@@ -369,8 +368,6 @@ pub async fn whisper_get_models_directory(app: AppHandle) -> Result<String, Stri
                 Err("Whisper engine not initialized".to_string())
             }
         }
-    }
-}
     }
 }
 
