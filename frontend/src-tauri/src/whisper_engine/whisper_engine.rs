@@ -205,15 +205,24 @@ impl WhisperEngine {
                     Ok(metadata) => {
                         let file_size_bytes = metadata.len();
                         let file_size_mb = file_size_bytes / (1024 * 1024);
-                        let expected_min_size_mb = (size_mb as f64 * 0.9) as u64; // Allow 90% of expected size as minimum for more accurate corruption detection
+                        // More lenient size check: allow 70% to 150% of expected size
+                        // This accounts for:
+                        // - Compression variations between model versions
+                        // - Rounding differences in size calculations
+                        // - Metadata and header differences
+                        let expected_min_size_mb = (size_mb as f64 * 0.7) as u64;
+                        let expected_max_size_mb = (size_mb as f64 * 1.5) as u64;
 
-                        if file_size_mb >= expected_min_size_mb && file_size_mb > 1 {
-                            // File size looks good, but let's also check if it's a valid GGML file
+                        if file_size_mb >= expected_min_size_mb && file_size_mb <= expected_max_size_mb && file_size_mb > 1 {
+                            // File size looks reasonable, validate it's a proper GGML file
                             match self.validate_model_file(&model_path).await {
-                                Ok(_) => ModelStatus::Available,
-                                Err(_) => {
-                                    log::warn!("Model file {} has correct size but appears corrupted (failed validation)",
-                                             filename);
+                                Ok(_) => {
+                                    log::debug!("Model {} validated successfully ({} MB)", name, file_size_mb);
+                                    ModelStatus::Available
+                                },
+                                Err(e) => {
+                                    log::warn!("Model file {} has reasonable size but failed validation: {}",
+                                             filename, e);
                                     ModelStatus::Corrupted {
                                         file_size: file_size_bytes,
                                         expected_min_size: (expected_min_size_mb * 1024 * 1024) as u64
@@ -221,7 +230,7 @@ impl WhisperEngine {
                                 }
                             }
                         } else if file_size_mb > 0 {
-                            // File exists but is smaller than expected
+                            // File exists but is outside the expected size range
                             // Check if this model is currently being downloaded
                             let models_guard = self.available_models.read().await;
                             if let Some(existing_model) = models_guard.get(name) {
@@ -232,7 +241,7 @@ impl WhisperEngine {
                                         ModelStatus::Downloading { progress: *progress }
                                     }
                                     _ => {
-                                        log::warn!("Model file {} exists but is corrupted ({} MB, expected ~{} MB)",
+                                        log::warn!("Model file {} has unexpected size: {} MB (expected: {} MB ±30%)",
                                                  filename, file_size_mb, size_mb);
                                         ModelStatus::Corrupted {
                                             file_size: file_size_bytes,
@@ -241,7 +250,7 @@ impl WhisperEngine {
                                     }
                                 }
                             } else {
-                                log::warn!("Model file {} exists but is corrupted ({} MB, expected ~{} MB)",
+                                log::warn!("Model file {} has unexpected size: {} MB (expected: {} MB ±30%)",
                                          filename, file_size_mb, size_mb);
                                 ModelStatus::Corrupted {
                                     file_size: file_size_bytes,
