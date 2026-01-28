@@ -46,6 +46,7 @@ pub mod onboarding;
 pub mod openrouter;
 pub mod parakeet_engine;
 pub mod state;
+pub mod storage_preferences;
 pub mod summary;
 pub mod tray;
 pub mod utils;
@@ -701,7 +702,14 @@ pub fn run() {
             // Database and Models path commands
             database::commands::get_database_directory,
             database::commands::open_database_folder,
+            database::commands::select_database_folder,
             whisper_engine::commands::open_models_folder,
+            whisper_engine::commands::select_models_folder,
+            // Storage preferences commands
+            storage_preferences::get_storage_preferences,
+            storage_preferences::set_storage_preferences,
+            storage_preferences::set_database_path,
+            storage_preferences::set_models_path,
             // Onboarding commands
             onboarding::get_onboarding_status,
             onboarding::save_onboarding_status_cmd,
