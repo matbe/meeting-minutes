@@ -503,3 +503,25 @@ pub async fn open_models_folder() -> Result<(), String> {
     log::info!("Opened models folder: {}", folder_path);
     Ok(())
 }
+
+/// Open a dialog to select a folder for models storage
+#[command]
+pub async fn select_models_folder(app: AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    log::info!("Opening dialog to select models folder");
+
+    let folder_path = app
+        .dialog()
+        .file()
+        .blocking_pick_folder();
+
+    if let Some(path) = folder_path {
+        let path_str = path.to_string();
+        log::info!("User selected models folder: {}", path_str);
+        Ok(Some(path_str))
+    } else {
+        log::info!("User cancelled folder selection");
+        Ok(None)
+    }
+}

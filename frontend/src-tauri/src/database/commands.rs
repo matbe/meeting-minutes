@@ -273,3 +273,25 @@ pub async fn open_database_folder(app: AppHandle) -> Result<(), String> {
     info!("Opened database folder: {}", folder_path);
     Ok(())
 }
+
+/// Open a dialog to select a folder for database storage
+#[tauri::command]
+pub async fn select_database_folder(app: AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    info!("Opening dialog to select database folder");
+
+    let folder_path = app
+        .dialog()
+        .file()
+        .blocking_pick_folder();
+
+    if let Some(path) = folder_path {
+        let path_str = path.to_string();
+        info!("User selected database folder: {}", path_str);
+        Ok(Some(path_str))
+    } else {
+        info!("User cancelled folder selection");
+        Ok(None)
+    }
+}
