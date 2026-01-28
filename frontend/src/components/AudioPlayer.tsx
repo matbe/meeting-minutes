@@ -22,6 +22,16 @@ function formatTime(seconds: number): string {
   return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 }
 
+// Convert file path to Tauri asset URL
+// The asset protocol expects the path without encoding directory separators
+function buildAssetUrl(filePath: string): string {
+  // On Windows, convert backslashes to forward slashes
+  const normalizedPath = filePath.replace(/\\/g, '/');
+  // Remove leading slash if present (Windows paths start with drive letter)
+  const cleanPath = normalizedPath.startsWith('/') ? normalizedPath : '/' + normalizedPath;
+  return `asset://localhost${cleanPath}`;
+}
+
 export const AudioPlayer = forwardRef<AudioPlayerRef, AudioPlayerProps>(
   ({ audioFilePath, onTimeUpdate, className = '' }, ref) => {
     const [isPlaying, setIsPlaying] = useState(false);
@@ -30,6 +40,12 @@ export const AudioPlayer = forwardRef<AudioPlayerRef, AudioPlayerProps>(
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const audioRef = useRef<HTMLAudioElement | null>(null);
+    
+    // Store the latest onTimeUpdate callback in a ref to avoid re-creating audio element
+    const onTimeUpdateRef = useRef(onTimeUpdate);
+    useEffect(() => {
+      onTimeUpdateRef.current = onTimeUpdate;
+    }, [onTimeUpdate]);
 
     // Expose seekTo method via ref
     useImperativeHandle(ref, () => ({
@@ -55,11 +71,10 @@ export const AudioPlayer = forwardRef<AudioPlayerRef, AudioPlayerProps>(
       setError(null);
 
       // Create audio element with the file path
-      // For Tauri, we need to use the asset protocol
       const audio = new Audio();
       
-      // Convert file path to Tauri asset URL
-      const assetUrl = `asset://localhost/${encodeURIComponent(audioFilePath)}`;
+      // Convert file path to Tauri asset URL (handles path separators correctly)
+      const assetUrl = buildAssetUrl(audioFilePath);
       audio.src = assetUrl;
 
       audio.onloadedmetadata = () => {
@@ -75,12 +90,12 @@ export const AudioPlayer = forwardRef<AudioPlayerRef, AudioPlayerProps>(
 
       audio.ontimeupdate = () => {
         setCurrentTime(audio.currentTime);
-        onTimeUpdate?.(audio.currentTime);
+        onTimeUpdateRef.current?.(audio.currentTime);
       };
 
       audio.onended = () => {
         setIsPlaying(false);
-        setCurrentTime(0);
+        // Keep currentTime at duration to show "finished" state
       };
 
       audio.onplay = () => setIsPlaying(true);
@@ -93,7 +108,7 @@ export const AudioPlayer = forwardRef<AudioPlayerRef, AudioPlayerProps>(
         audio.src = '';
         audioRef.current = null;
       };
-    }, [audioFilePath, onTimeUpdate]);
+    }, [audioFilePath]); // Removed onTimeUpdate from dependencies
 
     // Handle play/pause toggle
     const togglePlayPause = useCallback(async () => {

@@ -113,10 +113,14 @@ const TranscriptSegment = memo(function TranscriptSegment({
                         </button>
                     </TooltipTrigger>
                     <TooltipContent>
-                        {onClick && <span className="text-xs">Click to jump to this time</span>}
-                        {confidence !== undefined && showConfidence && (
-                            <ConfidenceIndicator confidence={confidence} showIndicator={showConfidence} />
-                        )}
+                        <div className="flex flex-col gap-1">
+                            {onClick && <span className="text-xs">Click to jump to this time</span>}
+                            {confidence !== undefined && showConfidence && (
+                                <div className={onClick ? 'border-t border-gray-200 pt-1' : ''}>
+                                    <ConfidenceIndicator confidence={confidence} showIndicator={showConfidence} />
+                                </div>
+                            )}
+                        </div>
                     </TooltipContent>
                 </Tooltip>
                 <div className="flex-1">
@@ -249,12 +253,22 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     const useVirtualization = segments.length >= VIRTUALIZATION_THRESHOLD;
 
     // Helper function to check if a segment is currently active based on playback time
-    const isSegmentActive = (segment: TranscriptSegmentData): boolean => {
+    // Use the segment's endTime if available, otherwise use the next segment's startTime or a reasonable duration
+    const isSegmentActive = useCallback((segment: TranscriptSegmentData, index?: number): boolean => {
         if (currentPlaybackTime === undefined) return false;
         const startTime = segment.timestamp;
-        const endTime = segment.endTime ?? (startTime + 10); // Default to 10 seconds if no end time
+        // Prefer segment.endTime, then try next segment's start, fallback to start + duration estimate
+        let endTime = segment.endTime;
+        if (endTime === undefined && index !== undefined && index < segments.length - 1) {
+            // Use next segment's start time as this segment's end
+            endTime = segments[index + 1].timestamp;
+        }
+        if (endTime === undefined) {
+            // Fallback: estimate based on typical segment duration (5 seconds)
+            endTime = startTime + 5;
+        }
         return currentPlaybackTime >= startTime && currentPlaybackTime < endTime;
-    };
+    }, [currentPlaybackTime, segments]);
 
     return (
         <div ref={scrollRef} className="flex flex-col h-full overflow-y-auto px-4 py-2">
@@ -331,7 +345,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
                                         onClick={onSegmentClick ? () => onSegmentClick(segment.timestamp) : undefined}
-                                        isActive={isSegmentActive(segment)}
+                                        isActive={isSegmentActive(segment, virtualRow.index)}
                                     />
                                 </div>
                             );
@@ -371,7 +385,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                 // Simple rendering for small lists (better animations)
                 <>
                     <div className="space-y-1">
-                        {segments.map((segment) => {
+                        {segments.map((segment, index) => {
                             const isStreaming = streamingSegmentId === segment.id;
 
                             return (
@@ -390,7 +404,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
                                         onClick={onSegmentClick ? () => onSegmentClick(segment.timestamp) : undefined}
-                                        isActive={isSegmentActive(segment)}
+                                        isActive={isSegmentActive(segment, index)}
                                     />
                                 </motion.div>
                             );

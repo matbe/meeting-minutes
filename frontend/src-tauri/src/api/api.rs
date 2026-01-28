@@ -1381,7 +1381,8 @@ pub async fn api_test_custom_openai_connection<R: Runtime>(
 }
 
 /// Get the audio file path for a meeting folder
-/// Searches for .mp4 or .wav files in the meeting folder and returns the first match
+/// Searches for common audio file formats (.mp4, .wav, .m4a, .webm, .ogg) in the meeting folder
+/// Returns the first match, prioritizing audio.mp4 which is the default recording format
 #[tauri::command]
 pub async fn get_meeting_audio_path(meeting_folder: String) -> Result<Option<String>, String> {
     log_debug!("Looking for audio file in folder: {}", meeting_folder);
@@ -1393,6 +1394,12 @@ pub async fn get_meeting_audio_path(meeting_folder: String) -> Result<Option<Str
         return Ok(None);
     }
 
+    // Verify it's a directory
+    if !folder_path.is_dir() {
+        log_warn!("Path is not a directory: {}", meeting_folder);
+        return Err("Path is not a directory".to_string());
+    }
+
     // Look for audio.mp4 first (the default name used by the recording system)
     let audio_mp4 = folder_path.join("audio.mp4");
     if audio_mp4.exists() {
@@ -1400,7 +1407,10 @@ pub async fn get_meeting_audio_path(meeting_folder: String) -> Result<Option<Str
         return Ok(Some(audio_mp4.to_string_lossy().to_string()));
     }
 
-    // Then look for any .mp4 or .wav file
+    // Supported audio file extensions
+    const AUDIO_EXTENSIONS: &[&str] = &["mp4", "wav", "m4a", "webm", "ogg", "flac", "aac"];
+
+    // Then look for any supported audio file
     let entries = std::fs::read_dir(folder_path)
         .map_err(|e| format!("Failed to read meeting folder: {}", e))?;
 
@@ -1408,7 +1418,7 @@ pub async fn get_meeting_audio_path(meeting_folder: String) -> Result<Option<Str
         let path = entry.path();
         if let Some(ext) = path.extension() {
             let ext_lower = ext.to_string_lossy().to_lowercase();
-            if ext_lower == "mp4" || ext_lower == "wav" {
+            if AUDIO_EXTENSIONS.contains(&ext_lower.as_str()) {
                 log_debug!("Found audio file: {:?}", path);
                 return Ok(Some(path.to_string_lossy().to_string()));
             }
