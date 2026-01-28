@@ -56,17 +56,6 @@ export function DeviceSelection({ selectedDevices, onDeviceChange, disabled = fa
   // Get default output device name for Windows display
   const defaultOutputDevice = outputDevices.length > 0 ? outputDevices[0]?.name : 'Default System Audio';
 
-  // Handle platform-specific defaults
-  useEffect(() => {
-    // On Windows, force system device to null (use default)
-    if (isWindows && selectedDevices.systemDevice !== null) {
-      onDeviceChange({
-        ...selectedDevices,
-        systemDevice: null
-      });
-    }
-  }, [isWindows]);
-
   // Fetch available audio devices
   const fetchDevices = async () => {
     try {
