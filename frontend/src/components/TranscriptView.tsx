@@ -301,10 +301,12 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
         const originalWasEmpty = transcript.text.trim() === '';
         const displayText = originalWasEmpty && !isStreaming ? '[Silence]' : filteredText;
 
-        // Sizer text: use cleaned version for proper sizing, fallback to [Silence] only if original was empty
-        const sizerTextCleaned = cleanStopWords(isStreaming ? streamingTranscript.fullText : transcript.text);
-        const sizerText = applyVocabularyCorrection(sizerTextCleaned)
-          || (originalWasEmpty && !isStreaming ? '[Silence]' : '');
+        // Sizer text: calculate full text once and reuse the correction result
+        // For streaming, use the full text; for regular, we can reuse the filtered text
+        const fullTextForSizer = isStreaming ? streamingTranscript.fullText : transcript.text;
+        const sizerText = isStreaming 
+          ? applyVocabularyCorrection(cleanStopWords(fullTextForSizer))
+          : (filteredText || (originalWasEmpty ? '[Silence]' : ''));
 
         return (
           <motion.div

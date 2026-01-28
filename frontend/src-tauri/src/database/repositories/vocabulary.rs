@@ -25,7 +25,7 @@ impl VocabularyRepository {
         id: &str,
     ) -> std::result::Result<Option<VocabularySet>, sqlx::Error> {
         let set = sqlx::query_as::<_, VocabularySet>(
-            "SELECT id, name, description, is_default, created_at, updated_at FROM vocabulary_sets WHERE id = $1"
+            "SELECT id, name, description, is_default, created_at, updated_at FROM vocabulary_sets WHERE id = ?"
         )
         .bind(id)
         .fetch_optional(pool)
@@ -46,7 +46,7 @@ impl VocabularyRepository {
         sqlx::query(
             r#"
             INSERT INTO vocabulary_sets (id, name, description, is_default, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6)
+            VALUES (?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&id)
@@ -74,8 +74,8 @@ impl VocabularyRepository {
         sqlx::query(
             r#"
             UPDATE vocabulary_sets 
-            SET name = $1, description = $2, is_default = $3, updated_at = $4
-            WHERE id = $5
+            SET name = ?, description = ?, is_default = ?, updated_at = ?
+            WHERE id = ?
             "#,
         )
         .bind(name)
@@ -94,7 +94,7 @@ impl VocabularyRepository {
         pool: &SqlitePool,
         id: &str,
     ) -> std::result::Result<(), sqlx::Error> {
-        sqlx::query("DELETE FROM vocabulary_sets WHERE id = $1")
+        sqlx::query("DELETE FROM vocabulary_sets WHERE id = ?")
             .bind(id)
             .execute(pool)
             .await?;
@@ -110,7 +110,7 @@ impl VocabularyRepository {
         set_id: &str,
     ) -> std::result::Result<Vec<VocabularyEntry>, sqlx::Error> {
         let entries = sqlx::query_as::<_, VocabularyEntry>(
-            "SELECT id, vocabulary_set_id, term, alternatives, category, pronunciation, enabled FROM vocabulary_entries WHERE vocabulary_set_id = $1 ORDER BY term ASC"
+            "SELECT id, vocabulary_set_id, term, alternatives, category, pronunciation, enabled FROM vocabulary_entries WHERE vocabulary_set_id = ? ORDER BY term ASC"
         )
         .bind(set_id)
         .fetch_all(pool)
@@ -136,7 +136,7 @@ impl VocabularyRepository {
         id: &str,
     ) -> std::result::Result<Option<VocabularyEntry>, sqlx::Error> {
         let entry = sqlx::query_as::<_, VocabularyEntry>(
-            "SELECT id, vocabulary_set_id, term, alternatives, category, pronunciation, enabled FROM vocabulary_entries WHERE id = $1"
+            "SELECT id, vocabulary_set_id, term, alternatives, category, pronunciation, enabled FROM vocabulary_entries WHERE id = ?"
         )
         .bind(id)
         .fetch_optional(pool)
@@ -160,7 +160,7 @@ impl VocabularyRepository {
         sqlx::query(
             r#"
             INSERT INTO vocabulary_entries (id, vocabulary_set_id, term, alternatives, category, pronunciation, enabled)
-            VALUES ($1, $2, $3, $4, $5, $6, 1)
+            VALUES (?, ?, ?, ?, ?, ?, 1)
             "#,
         )
         .bind(&id)
@@ -191,8 +191,8 @@ impl VocabularyRepository {
         sqlx::query(
             r#"
             UPDATE vocabulary_entries 
-            SET term = $1, alternatives = $2, category = $3, pronunciation = $4, enabled = $5
-            WHERE id = $6
+            SET term = ?, alternatives = ?, category = ?, pronunciation = ?, enabled = ?
+            WHERE id = ?
             "#,
         )
         .bind(term)
@@ -212,7 +212,7 @@ impl VocabularyRepository {
         pool: &SqlitePool,
         id: &str,
     ) -> std::result::Result<(), sqlx::Error> {
-        sqlx::query("DELETE FROM vocabulary_entries WHERE id = $1")
+        sqlx::query("DELETE FROM vocabulary_entries WHERE id = ?")
             .bind(id)
             .execute(pool)
             .await?;
@@ -226,7 +226,7 @@ impl VocabularyRepository {
         id: &str,
         enabled: bool,
     ) -> std::result::Result<(), sqlx::Error> {
-        sqlx::query("UPDATE vocabulary_entries SET enabled = $1 WHERE id = $2")
+        sqlx::query("UPDATE vocabulary_entries SET enabled = ? WHERE id = ?")
             .bind(enabled)
             .bind(id)
             .execute(pool)
@@ -237,8 +237,47 @@ impl VocabularyRepository {
 
     // ===== IMPORT/EXPORT OPERATIONS =====
 
+    /// Parse a CSV line respecting quoted values that may contain commas
+    fn parse_csv_line(line: &str) -> Vec<String> {
+        let mut fields = Vec::new();
+        let mut current_field = String::new();
+        let mut in_quotes = false;
+        let mut chars = line.chars().peekable();
+        
+        while let Some(c) = chars.next() {
+            match c {
+                '"' => {
+                    if in_quotes {
+                        // Check for escaped quote ("")
+                        if chars.peek() == Some(&'"') {
+                            chars.next(); // consume the second quote
+                            current_field.push('"');
+                        } else {
+                            in_quotes = false;
+                        }
+                    } else {
+                        in_quotes = true;
+                    }
+                }
+                ',' if !in_quotes => {
+                    fields.push(current_field.trim().to_string());
+                    current_field = String::new();
+                }
+                _ => {
+                    current_field.push(c);
+                }
+            }
+        }
+        
+        // Don't forget the last field
+        fields.push(current_field.trim().to_string());
+        
+        fields
+    }
+
     /// Import vocabulary entries from CSV content
-    /// CSV format: term,alternatives (comma-separated within quotes),category
+    /// CSV format: term,alternatives (semicolon-separated within field),category
+    /// Properly handles quoted values that may contain commas
     pub async fn import_from_csv(
         pool: &SqlitePool,
         set_id: &str,
@@ -247,20 +286,23 @@ impl VocabularyRepository {
         let mut count = 0;
 
         for line in csv_content.lines().skip(1) {
-            // Skip header row
-            let parts: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
+            // Skip header row and empty lines
+            if line.trim().is_empty() {
+                continue;
+            }
+            
+            let parts = Self::parse_csv_line(line);
             if parts.is_empty() {
                 continue;
             }
 
-            let term = parts.first().unwrap_or(&"").trim_matches('"');
+            let term = parts.first().unwrap_or(&String::new()).clone();
             if term.is_empty() {
                 continue;
             }
 
             let alternatives: Vec<String> = if parts.len() > 1 {
                 parts[1]
-                    .trim_matches('"')
                     .split(';')
                     .map(|s| s.trim().to_string())
                     .filter(|s| !s.is_empty())
@@ -269,14 +311,13 @@ impl VocabularyRepository {
                 Vec::new()
             };
 
-            let category = if parts.len() > 2 {
-                let cat = parts[2].trim_matches('"');
-                if cat.is_empty() { None } else { Some(cat) }
+            let category = if parts.len() > 2 && !parts[2].is_empty() {
+                Some(parts[2].as_str())
             } else {
                 None
             };
 
-            Self::add_entry(pool, set_id, term, &alternatives, category, None).await?;
+            Self::add_entry(pool, set_id, &term, &alternatives, category, None).await?;
             count += 1;
         }
 
@@ -284,6 +325,8 @@ impl VocabularyRepository {
     }
 
     /// Export vocabulary entries to CSV format
+    /// Uses semicolons to separate alternatives within the alternatives field
+    /// Properly escapes quotes and handles special characters
     pub async fn export_to_csv(
         pool: &SqlitePool,
         set_id: &str,
@@ -294,14 +337,20 @@ impl VocabularyRepository {
         
         for entry in entries {
             let parsed: VocabularyEntryParsed = entry.into();
+            // Use semicolons to separate alternatives
             let alternatives = parsed.alternatives.join(";");
             let category = parsed.category.unwrap_or_default();
             
+            // Escape quotes and remove newlines for CSV safety
+            let term_escaped = parsed.term.replace('"', "\"\"").replace('\n', " ").replace('\r', "");
+            let alts_escaped = alternatives.replace('"', "\"\"").replace('\n', " ").replace('\r', "");
+            let cat_escaped = category.replace('"', "\"\"").replace('\n', " ").replace('\r', "");
+            
             csv.push_str(&format!(
                 "\"{}\",\"{}\",\"{}\"\n",
-                parsed.term.replace('"', "\"\""),
-                alternatives.replace('"', "\"\""),
-                category.replace('"', "\"\"")
+                term_escaped,
+                alts_escaped,
+                cat_escaped
             ));
         }
 

@@ -2,12 +2,13 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { VocabularySetWithCount, VocabularyEntry } from '@/types';
+import { VocabularySetWithCount } from '@/types';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Plus, Trash2, Edit2, FileDown, FileUp, Book, ChevronRight } from 'lucide-react';
 import { VocabularyEditor } from './VocabularyEditor';
+import { ConfirmationModal } from './ConfirmationModel/confirmation-modal';
 
 interface VocabularySettingsProps {
   onClose?: () => void;
@@ -22,6 +23,13 @@ export function VocabularySettings({ onClose }: VocabularySettingsProps) {
   const [newSetDescription, setNewSetDescription] = useState('');
   const [editingSet, setEditingSet] = useState<VocabularySetWithCount | null>(null);
   const [selectedSet, setSelectedSet] = useState<VocabularySetWithCount | null>(null);
+  // Confirmation modal state
+  const [deleteConfirmation, setDeleteConfirmation] = useState<{ isOpen: boolean; setId: string | null }>({
+    isOpen: false,
+    setId: null,
+  });
+  // Import success message
+  const [importSuccess, setImportSuccess] = useState<string | null>(null);
 
   const loadVocabularySets = useCallback(async () => {
     try {
@@ -79,18 +87,22 @@ export function VocabularySettings({ onClose }: VocabularySettingsProps) {
     }
   };
 
-  const handleDeleteSet = async (setId: string) => {
-    if (!confirm('Are you sure you want to delete this vocabulary set? All entries will be removed.')) {
-      return;
-    }
-
+  const confirmDeleteSet = async () => {
+    if (!deleteConfirmation.setId) return;
+    
     try {
-      await invoke('delete_vocabulary_set', { setId });
+      await invoke('delete_vocabulary_set', { setId: deleteConfirmation.setId });
+      setDeleteConfirmation({ isOpen: false, setId: null });
       await loadVocabularySets();
     } catch (err) {
       console.error('Failed to delete vocabulary set:', err);
       setError('Failed to delete vocabulary set');
+      setDeleteConfirmation({ isOpen: false, setId: null });
     }
+  };
+
+  const handleDeleteSet = (setId: string) => {
+    setDeleteConfirmation({ isOpen: true, setId });
   };
 
   const handleExport = async (setId: string, setName: string) => {
@@ -129,7 +141,9 @@ export function VocabularySettings({ onClose }: VocabularySettingsProps) {
           setId,
           csvContent: content,
         });
-        alert(`Successfully imported ${count} vocabulary entries`);
+        setImportSuccess(`Successfully imported ${count} vocabulary entries`);
+        // Auto-hide success message after 3 seconds
+        setTimeout(() => setImportSuccess(null), 3000);
         await loadVocabularySets();
       } catch (err) {
         console.error('Failed to import vocabulary:', err);
@@ -185,6 +199,13 @@ export function VocabularySettings({ onClose }: VocabularySettingsProps) {
           New Set
         </Button>
       </div>
+
+      {/* Success message */}
+      {importSuccess && (
+        <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-md">
+          {importSuccess}
+        </div>
+      )}
 
       {/* Error message */}
       {error && (
@@ -351,11 +372,19 @@ export function VocabularySettings({ onClose }: VocabularySettingsProps) {
         <h4 className="font-medium text-blue-900 mb-2">How it works</h4>
         <ul className="text-sm text-blue-800 space-y-1">
           <li>• Add technical terms, product names, and acronyms that are often misrecognized</li>
-          <li>• Include common misrecognitions (e.g., &quot;Kubernetes&quot; → &quot;Cooper Netties&quot;)</li>
+          <li>• Include common misrecognitions (e.g., "Kubernetes" → "Cooper Netties")</li>
           <li>• Vocabulary is automatically applied to correct transcriptions</li>
           <li>• Import/export vocabulary sets as CSV for easy sharing</li>
         </ul>
       </div>
+
+      {/* Delete confirmation modal */}
+      <ConfirmationModal
+        isOpen={deleteConfirmation.isOpen}
+        text="Are you sure you want to delete this vocabulary set? All entries will be permanently removed."
+        onConfirm={confirmDeleteSet}
+        onCancel={() => setDeleteConfirmation({ isOpen: false, setId: null })}
+      />
     </div>
   );
 }

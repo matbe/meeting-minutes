@@ -19,6 +19,7 @@ import {
   Book,
 } from 'lucide-react';
 import { VOCABULARY_CATEGORIES, parseAlternatives, formatAlternatives } from '@/lib/vocabularyCorrection';
+import { ConfirmationModal } from './ConfirmationModel/confirmation-modal';
 
 interface VocabularyEditorProps {
   vocabularySet: VocabularySetWithCount;
@@ -39,6 +40,12 @@ export function VocabularyEditor({ vocabularySet, onBack }: VocabularyEditorProp
   const [formAlternatives, setFormAlternatives] = useState('');
   const [formCategory, setFormCategory] = useState<string>('');
   const [formPronunciation, setFormPronunciation] = useState('');
+  
+  // Delete confirmation state
+  const [deleteConfirmation, setDeleteConfirmation] = useState<{ isOpen: boolean; entryId: string | null }>({
+    isOpen: false,
+    entryId: null,
+  });
 
   const loadEntries = useCallback(async () => {
     try {
@@ -101,18 +108,22 @@ export function VocabularyEditor({ vocabularySet, onBack }: VocabularyEditorProp
     }
   };
 
-  const handleDeleteEntry = async (entryId: string) => {
-    if (!confirm('Are you sure you want to delete this vocabulary entry?')) {
-      return;
-    }
-
+  const confirmDeleteEntry = async () => {
+    if (!deleteConfirmation.entryId) return;
+    
     try {
-      await invoke('delete_vocabulary_entry', { entryId });
+      await invoke('delete_vocabulary_entry', { entryId: deleteConfirmation.entryId });
+      setDeleteConfirmation({ isOpen: false, entryId: null });
       await loadEntries();
     } catch (err) {
       console.error('Failed to delete vocabulary entry:', err);
       setError('Failed to delete vocabulary entry');
+      setDeleteConfirmation({ isOpen: false, entryId: null });
     }
+  };
+
+  const handleDeleteEntry = (entryId: string) => {
+    setDeleteConfirmation({ isOpen: true, entryId });
   };
 
   const handleToggleEnabled = async (entryId: string, enabled: boolean) => {
@@ -418,6 +429,14 @@ export function VocabularyEditor({ vocabularySet, onBack }: VocabularyEditorProp
           {searchQuery || categoryFilter !== 'all' ? ' (filtered)' : ''}
         </div>
       )}
+
+      {/* Delete confirmation modal */}
+      <ConfirmationModal
+        isOpen={deleteConfirmation.isOpen}
+        text="Are you sure you want to delete this vocabulary entry?"
+        onConfirm={confirmDeleteEntry}
+        onCancel={() => setDeleteConfirmation({ isOpen: false, entryId: null })}
+      />
     </div>
   );
 }
