@@ -3,6 +3,7 @@
 import React, { useRef, useState, useEffect, forwardRef, useImperativeHandle, useCallback } from 'react';
 import { Play, Pause, User } from 'lucide-react';
 import { convertFileSrc } from '@tauri-apps/api/core';
+import { readFile } from '@tauri-apps/plugin-fs';
 
 interface AudioPlayerProps {
   audioFilePath: string | null;
@@ -60,48 +61,110 @@ export const AudioPlayer = forwardRef<AudioPlayerRef, AudioPlayerProps>(
 
       setIsLoading(true);
       setError(null);
-
-      // Create audio element with the file path
-      const audio = new Audio();
       
-      // Use Tauri's official convertFileSrc to get the correct asset URL
-      const assetUrl = convertFileSrc(audioFilePath);
-      console.log('🔊 Loading audio from:', assetUrl, '(original path:', audioFilePath, ')');
-      audio.src = assetUrl;
+      let blobUrl: string | null = null;
 
-      audio.onloadedmetadata = () => {
-        console.log('🔊 Audio loaded successfully, duration:', audio.duration);
-        setDuration(audio.duration);
-        setIsLoading(false);
+      // Load audio file using Tauri fs plugin and create blob URL
+      const loadAudioFile = async () => {
+        try {
+          console.log('🔊 Reading audio file:', audioFilePath);
+          
+          // Read file as binary using Tauri's fs plugin
+          const fileData = await readFile(audioFilePath);
+          console.log('🔊 File read successfully, size:', fileData.length, 'bytes');
+          
+          // Create a blob from the file data
+          const blob = new Blob([fileData], { type: 'audio/mp4' });
+          blobUrl = URL.createObjectURL(blob);
+          console.log('🔊 Created blob URL:', blobUrl);
+          
+          // Create audio element
+          const audio = new Audio();
+          audio.src = blobUrl;
+
+          audio.onloadedmetadata = () => {
+            console.log('🔊 Audio loaded successfully, duration:', audio.duration);
+            setDuration(audio.duration);
+            setIsLoading(false);
+          };
+
+          audio.onerror = (e) => {
+            console.error('🔊 Audio element error:', e);
+            setError('Failed to load audio file');
+            setIsLoading(false);
+          };
+
+          audio.ontimeupdate = () => {
+            setCurrentTime(audio.currentTime);
+            onTimeUpdateRef.current?.(audio.currentTime);
+          };
+
+          audio.onended = () => {
+            setIsPlaying(false);
+          };
+
+          audio.onplay = () => setIsPlaying(true);
+          audio.onpause = () => setIsPlaying(false);
+
+          audioRef.current = audio;
+        } catch (err) {
+          console.error('🔊 Failed to read audio file:', err);
+          
+          // Fallback: try using convertFileSrc (asset protocol)
+          console.log('🔊 Trying fallback with convertFileSrc...');
+          try {
+            const assetUrl = convertFileSrc(audioFilePath);
+            console.log('🔊 Fallback asset URL:', assetUrl);
+            
+            const audio = new Audio();
+            audio.src = assetUrl;
+
+            audio.onloadedmetadata = () => {
+              console.log('🔊 Audio loaded via asset protocol, duration:', audio.duration);
+              setDuration(audio.duration);
+              setIsLoading(false);
+            };
+
+            audio.onerror = (e) => {
+              console.error('🔊 Asset protocol also failed:', e);
+              setError('Failed to load audio file');
+              setIsLoading(false);
+            };
+
+            audio.ontimeupdate = () => {
+              setCurrentTime(audio.currentTime);
+              onTimeUpdateRef.current?.(audio.currentTime);
+            };
+
+            audio.onended = () => {
+              setIsPlaying(false);
+            };
+
+            audio.onplay = () => setIsPlaying(true);
+            audio.onpause = () => setIsPlaying(false);
+
+            audioRef.current = audio;
+          } catch (fallbackErr) {
+            console.error('🔊 Fallback also failed:', fallbackErr);
+            setError('Failed to load audio file');
+            setIsLoading(false);
+          }
+        }
       };
 
-      audio.onerror = (e) => {
-        console.error('🔊 Audio loading error:', e, 'URL:', assetUrl);
-        setError('Failed to load audio file');
-        setIsLoading(false);
-      };
-
-      audio.ontimeupdate = () => {
-        setCurrentTime(audio.currentTime);
-        onTimeUpdateRef.current?.(audio.currentTime);
-      };
-
-      audio.onended = () => {
-        setIsPlaying(false);
-        // Keep currentTime at duration to show "finished" state
-      };
-
-      audio.onplay = () => setIsPlaying(true);
-      audio.onpause = () => setIsPlaying(false);
-
-      audioRef.current = audio;
+      loadAudioFile();
 
       return () => {
-        audio.pause();
-        audio.src = '';
-        audioRef.current = null;
+        if (audioRef.current) {
+          audioRef.current.pause();
+          audioRef.current.src = '';
+          audioRef.current = null;
+        }
+        if (blobUrl) {
+          URL.revokeObjectURL(blobUrl);
+        }
       };
-    }, [audioFilePath]); // Removed onTimeUpdate from dependencies
+    }, [audioFilePath]);
 
     // Handle play/pause toggle
     const togglePlayPause = useCallback(async () => {
