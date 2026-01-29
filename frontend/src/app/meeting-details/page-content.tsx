@@ -1,8 +1,8 @@
 "use client";
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
-import { Summary, SummaryResponse, Speaker } from '@/types';
+import { Summary, SummaryResponse, Speaker, TranscriptSegmentData } from '@/types';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import Analytics from '@/lib/analytics';
 import { TranscriptPanel } from '@/components/MeetingDetails/TranscriptPanel';
@@ -66,6 +66,8 @@ export default function PageContent({
   const [speakers, setSpeakers] = useState<Speaker[]>([]);
   const [playingSpeakerId, setPlayingSpeakerId] = useState<string | null>(null);
   const speakerSampleTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  // Speaker labels mapping: speaker_id -> label (for updating transcript display)
+  const [speakerLabels, setSpeakerLabels] = useState<Record<string, string>>({});
 
   // Ref to store the modal open function from SummaryGeneratorButtonGroup
   const openModelSettingsRef = useRef<(() => void) | null>(null);
@@ -230,7 +232,15 @@ export default function PageContent({
         speakers: updatedSpeakers,
       });
       setSpeakers(updatedSpeakers);
-      // TODO: Update transcripts with new speaker labels
+      
+      // Update speaker labels mapping for transcript display
+      const newLabels: Record<string, string> = {};
+      updatedSpeakers.forEach(speaker => {
+        newLabels[speaker.id] = speaker.label;
+      });
+      setSpeakerLabels(newLabels);
+      
+      console.log('✅ Speaker labels updated:', newLabels);
     } catch (err) {
       console.error('Failed to save speaker labels:', err);
     }
@@ -271,6 +281,23 @@ export default function PageContent({
       }
     };
   }, []);
+
+  // Enhanced segments with speaker labels applied
+  const enhancedSegments = useMemo(() => {
+    if (!segments) return undefined;
+    
+    // Apply speaker labels from the mapping (after user saves labels in modal)
+    return segments.map(segment => {
+      const speakerId = segment.speaker_id;
+      const updatedLabel = speakerId ? speakerLabels[speakerId] : undefined;
+      
+      return {
+        ...segment,
+        // Use the updated label if available, otherwise keep original
+        speaker_label: updatedLabel ?? segment.speaker_label,
+      };
+    });
+  }, [segments, speakerLabels]);
 
   // Auto-generate summary when flag is set
   useEffect(() => {
@@ -314,7 +341,7 @@ export default function PageContent({
           disableAutoScroll={true}
           // Pagination props for efficient loading
           usePagination={true}
-          segments={segments}
+          segments={enhancedSegments}
           hasMore={hasMore}
           isLoadingMore={isLoadingMore}
           totalCount={totalCount}

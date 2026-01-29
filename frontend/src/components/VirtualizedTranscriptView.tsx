@@ -97,7 +97,10 @@ const TranscriptSegment = memo(function TranscriptSegment({
     speakerLabel?: string;
 }) {
     const displayText = cleanStopWords(text) || (text.trim() === '' ? '[Silence]' : text);
-    const speakerColor = speakerId ? getSpeakerColor(speakerId) : null;
+    // Default speaker ID for "Guest" when no speaker is identified
+    const effectiveSpeakerId = speakerId ?? 'guest';
+    const effectiveSpeakerLabel = speakerLabel ?? 'Guest';
+    const speakerColor = getSpeakerColor(effectiveSpeakerId);
 
     return (
         <div 
@@ -105,14 +108,12 @@ const TranscriptSegment = memo(function TranscriptSegment({
             className={`mb-3 ${isActive ? 'bg-blue-50 -mx-2 px-2 py-1 rounded-lg border-l-2 border-blue-500' : ''}`}
         >
             <div className="flex items-start gap-2">
-                {/* Speaker Label */}
-                {speakerLabel && speakerColor && (
-                    <span 
-                        className={`text-xs mt-1 flex-shrink-0 px-2 py-0.5 rounded-full ${speakerColor.bg} ${speakerColor.text} font-medium`}
-                    >
-                        {speakerLabel}
-                    </span>
-                )}
+                {/* Speaker Label - always shown, defaults to "Guest" */}
+                <span 
+                    className={`text-xs mt-1 flex-shrink-0 px-2 py-0.5 rounded-full ${speakerColor.bg} ${speakerColor.text} font-medium`}
+                >
+                    {effectiveSpeakerLabel}
+                </span>
                 <Tooltip>
                     <TooltipTrigger asChild>
                         <button

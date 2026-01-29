@@ -224,22 +224,27 @@ export function SpeakerTagModal({
         </div>
 
         {localSpeakers.length > 0 && (
-          <div className="flex justify-end gap-2 mt-4 pt-4 border-t border-gray-200">
-            <button
-              onClick={onClose}
-              className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-md transition-colors"
-              type="button"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleSave}
-              className="px-4 py-2 text-sm bg-blue-500 text-white hover:bg-blue-600 rounded-md transition-colors"
-              type="button"
-            >
-              Save Changes
-            </button>
-          </div>
+          <>
+            <p className="text-xs text-gray-400 mt-2">
+              Play to hear voice, click name to rename
+            </p>
+            <div className="flex justify-end gap-2 mt-4 pt-4 border-t border-gray-200">
+              <button
+                onClick={onClose}
+                className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-md transition-colors"
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSave}
+                className="px-4 py-2 text-sm bg-blue-500 text-white hover:bg-blue-600 rounded-md transition-colors"
+                type="button"
+              >
+                Save Changes
+              </button>
+            </div>
+          </>
         )}
       </DialogContent>
     </Dialog>
