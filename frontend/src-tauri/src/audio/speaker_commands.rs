@@ -1,7 +1,7 @@
 //! Speaker diarization commands for tauri
 //!
 //! Provides speaker recognition and labeling functionality.
-//! Uses a heuristic-based approach to detect speaker changes in transcripts.
+//! Uses timing-based turn detection for speaker assignment.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -47,112 +47,79 @@ struct SpeakerStats {
     first_audio_start: Option<f64>,
 }
 
-/// Performs heuristic-based speaker diarization on transcript segments.
-/// This analyzes the transcripts and assigns speakers based on:
-/// - Gap timing between segments (large gaps suggest speaker change)
-/// - Text patterns (questions, responses, etc.)
-/// - Segment length and speaking patterns
-fn assign_speakers_heuristic(
+/// Represents a turn in the conversation (a continuous speaking segment by one speaker)
+#[derive(Debug, Clone)]
+struct ConversationTurn {
+    start_time: f64,
+    end_time: f64,
+    segment_indices: Vec<usize>,
+}
+
+/// Performs turn-based speaker diarization on transcript segments.
+///
+/// This algorithm:
+/// 1. Groups consecutive segments into "turns" based on timing gaps
+/// 2. Assigns speakers to turns using an alternating model (common in conversations)
+/// 3. Handles overlapping speech and short pauses within same speaker's turn
+fn assign_speakers_turn_based(
     segments: &[(String, String, Option<f64>, Option<f64>)], // (id, text, audio_start, audio_end)
 ) -> (Vec<SpeakerLabel>, Vec<Speaker>) {
     if segments.is_empty() {
         return (vec![], vec![]);
     }
 
-    let mut speaker_labels = Vec::new();
+    // Step 1: Group segments into turns based on timing
+    let turns = group_into_turns(segments);
+
+    log::info!(
+        "Detected {} conversation turns from {} segments",
+        turns.len(),
+        segments.len()
+    );
+
+    // Step 2: Assign speakers to turns using alternating model
+    let turn_speakers = assign_speakers_to_turns(&turns, segments);
+
+    // Step 3: Build speaker labels and statistics
     let mut speaker_stats: HashMap<String, SpeakerStats> = HashMap::new();
+    let mut speaker_labels = Vec::new();
 
-    // Simple heuristic: assign speakers based on timing gaps and patterns
-    // A gap of more than 2 seconds suggests a potential speaker change
-    const SPEAKER_CHANGE_GAP: f64 = 2.0;
+    for (turn_idx, turn) in turns.iter().enumerate() {
+        let speaker_id = &turn_speakers[turn_idx];
+        let speaker_num = speaker_id.chars().last().unwrap_or('1');
 
-    let mut current_speaker_idx = 1;
-    let mut last_end_time: Option<f64> = None;
-    let mut last_speaker_id = String::new();
+        for &seg_idx in &turn.segment_indices {
+            let (segment_id, _text, audio_start, audio_end) = &segments[seg_idx];
 
-    for (idx, (segment_id, text, audio_start, audio_end)) in segments.iter().enumerate() {
-        let speaker_id: String;
-
-        // Determine if this is a speaker change
-        let is_speaker_change = if idx == 0 {
-            true // First segment always starts with Speaker 1
-        } else if let (Some(start), Some(last_end)) = (audio_start, last_end_time) {
-            let gap = start - last_end;
-
-            // Heuristics for speaker change:
-            // 1. Large gap between segments
-            // 2. Text starts with question indicators
-            // 3. Text contains "I think", "I believe" after a statement
-            let has_large_gap = gap > SPEAKER_CHANGE_GAP;
-            let starts_with_question = text.trim().starts_with("How")
-                || text.trim().starts_with("What")
-                || text.trim().starts_with("Why")
-                || text.trim().starts_with("When")
-                || text.trim().starts_with("Where")
-                || text.trim().starts_with("Do you")
-                || text.trim().starts_with("Are you")
-                || text.trim().starts_with("Is ");
-            let is_response_pattern = text.trim().starts_with("Yeah")
-                || text.trim().starts_with("Yes")
-                || text.trim().starts_with("No,")
-                || text.trim().starts_with("Well,")
-                || text.trim().starts_with("So,")
-                || text.trim().starts_with("I think")
-                || text.trim().starts_with("I believe");
-
-            // Change speaker if there's a significant gap OR if it looks like a new speaker pattern
-            has_large_gap || (gap > 0.5 && (starts_with_question || is_response_pattern))
-        } else {
-            // No timing info, alternate speakers every few segments
-            idx % 3 == 0
-        };
-
-        if is_speaker_change && !last_speaker_id.is_empty() {
-            // Cycle through speakers (max 4 for simplicity)
-            current_speaker_idx = if current_speaker_idx >= 4 {
-                1
-            } else {
-                current_speaker_idx + 1
+            let duration = match (audio_start, audio_end) {
+                (Some(start), Some(end)) => end - start,
+                _ => 3.0,
             };
-        }
 
-        speaker_id = format!("speaker_{}", current_speaker_idx);
-        last_speaker_id = speaker_id.clone();
+            let stats = speaker_stats
+                .entry(speaker_id.clone())
+                .or_insert(SpeakerStats {
+                    id: speaker_id.clone(),
+                    label: format!("Speaker {}", speaker_num),
+                    segment_count: 0,
+                    total_duration: 0.0,
+                    first_audio_start: *audio_start,
+                });
 
-        // Calculate duration
-        let duration = match (audio_start, audio_end) {
-            (Some(start), Some(end)) => end - start,
-            _ => 3.0, // Default 3 seconds if no timing
-        };
+            stats.segment_count += 1;
+            stats.total_duration += duration;
+            if stats.first_audio_start.is_none() {
+                stats.first_audio_start = *audio_start;
+            }
 
-        // Update speaker stats
-        let stats = speaker_stats
-            .entry(speaker_id.clone())
-            .or_insert(SpeakerStats {
-                id: speaker_id.clone(),
-                label: format!("Speaker {}", speaker_id.chars().last().unwrap_or('1')),
-                segment_count: 0,
-                total_duration: 0.0,
-                first_audio_start: *audio_start,
+            speaker_labels.push(SpeakerLabel {
+                segment_id: segment_id.clone(),
+                speaker_id: speaker_id.clone(),
+                speaker_label: stats.label.clone(),
             });
-        stats.segment_count += 1;
-        stats.total_duration += duration;
-        if stats.first_audio_start.is_none() {
-            stats.first_audio_start = *audio_start;
         }
-
-        // Create speaker label for this segment
-        speaker_labels.push(SpeakerLabel {
-            segment_id: segment_id.clone(),
-            speaker_id: speaker_id.clone(),
-            speaker_label: stats.label.clone(),
-        });
-
-        // Update last end time
-        last_end_time = *audio_end;
     }
 
-    // Convert stats to Speaker objects
     let speakers: Vec<Speaker> = speaker_stats
         .into_values()
         .map(|stats| Speaker {
@@ -165,6 +132,211 @@ fn assign_speakers_heuristic(
         .collect();
 
     (speaker_labels, speakers)
+}
+
+/// Groups consecutive segments into conversation turns based on timing gaps
+fn group_into_turns(
+    segments: &[(String, String, Option<f64>, Option<f64>)],
+) -> Vec<ConversationTurn> {
+    // Gap threshold for considering a speaker change (in seconds)
+    // A pause longer than this suggests a new turn
+    const TURN_GAP_THRESHOLD: f64 = 1.5;
+
+    let mut turns: Vec<ConversationTurn> = Vec::new();
+    let mut current_turn_segments: Vec<usize> = Vec::new();
+    let mut current_turn_start: Option<f64> = None;
+    let mut last_end_time: Option<f64> = None;
+
+    for (idx, (_id, _text, audio_start, audio_end)) in segments.iter().enumerate() {
+        let start = audio_start.unwrap_or(idx as f64 * 5.0); // Fallback timing
+        let end = audio_end.unwrap_or(start + 3.0);
+
+        // Check if this segment starts a new turn
+        let is_new_turn = if let Some(last_end) = last_end_time {
+            let gap = start - last_end;
+            gap > TURN_GAP_THRESHOLD
+        } else {
+            true // First segment starts a new turn
+        };
+
+        if is_new_turn && !current_turn_segments.is_empty() {
+            // Save the current turn
+            turns.push(ConversationTurn {
+                start_time: current_turn_start.unwrap_or(0.0),
+                end_time: last_end_time.unwrap_or(0.0),
+                segment_indices: current_turn_segments.clone(),
+            });
+            current_turn_segments.clear();
+            current_turn_start = None;
+        }
+
+        // Add segment to current turn
+        if current_turn_start.is_none() {
+            current_turn_start = Some(start);
+        }
+        current_turn_segments.push(idx);
+        last_end_time = Some(end);
+    }
+
+    // Don't forget the last turn
+    if !current_turn_segments.is_empty() {
+        turns.push(ConversationTurn {
+            start_time: current_turn_start.unwrap_or(0.0),
+            end_time: last_end_time.unwrap_or(0.0),
+            segment_indices: current_turn_segments,
+        });
+    }
+
+    turns
+}
+
+/// Assigns speakers to turns using conversation patterns
+fn assign_speakers_to_turns(
+    turns: &[ConversationTurn],
+    segments: &[(String, String, Option<f64>, Option<f64>)],
+) -> Vec<String> {
+    if turns.is_empty() {
+        return vec![];
+    }
+
+    // Analyze the conversation to estimate number of speakers
+    let num_speakers = estimate_speaker_count(turns, segments);
+    log::info!("Estimated {} speakers in conversation", num_speakers);
+
+    let mut turn_speakers = Vec::with_capacity(turns.len());
+    let mut current_speaker = 1;
+
+    for (turn_idx, turn) in turns.iter().enumerate() {
+        // For the first turn, always start with Speaker 1
+        if turn_idx == 0 {
+            turn_speakers.push(format!("speaker_{}", current_speaker));
+            continue;
+        }
+
+        // Check if this turn should be a different speaker
+        let prev_turn = &turns[turn_idx - 1];
+        let gap_between_turns = turn.start_time - prev_turn.end_time;
+
+        // Get text from the current turn for analysis
+        let current_text = get_turn_text(turn, segments);
+
+        // Determine if speaker changed based on multiple factors
+        let should_change_speaker =
+            analyze_speaker_change(gap_between_turns, &current_text, turn_idx, turns.len());
+
+        if should_change_speaker {
+            // Cycle to next speaker
+            current_speaker = if current_speaker >= num_speakers {
+                1
+            } else {
+                current_speaker + 1
+            };
+        }
+
+        turn_speakers.push(format!("speaker_{}", current_speaker));
+    }
+
+    turn_speakers
+}
+
+/// Estimates the number of speakers based on conversation patterns
+fn estimate_speaker_count(
+    turns: &[ConversationTurn],
+    _segments: &[(String, String, Option<f64>, Option<f64>)],
+) -> usize {
+    // Estimate based on turn patterns
+    // Most conversations have 2-4 speakers
+
+    // Count significant pauses (potential speaker changes)
+    let mut significant_pauses = 0;
+    for i in 1..turns.len() {
+        let gap = turns[i].start_time - turns[i - 1].end_time;
+        if gap > 1.0 {
+            significant_pauses += 1;
+        }
+    }
+
+    // Estimate speakers: for short meetings, likely 2; for longer ones, maybe 3-4
+    if turns.len() <= 5 {
+        2
+    } else if significant_pauses > turns.len() / 2 {
+        // Many pauses suggest more back-and-forth, likely 2 speakers
+        2
+    } else if turns.len() > 20 {
+        // Longer meeting might have more speakers
+        std::cmp::min(3, (turns.len() / 10) + 2)
+    } else {
+        2
+    }
+}
+
+/// Gets the combined text from a turn
+fn get_turn_text(
+    turn: &ConversationTurn,
+    segments: &[(String, String, Option<f64>, Option<f64>)],
+) -> String {
+    turn.segment_indices
+        .iter()
+        .map(|&idx| segments[idx].1.as_str())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Analyzes whether the speaker likely changed at this turn
+fn analyze_speaker_change(gap: f64, text: &str, turn_idx: usize, total_turns: usize) -> bool {
+    let text_lower = text.to_lowercase();
+    let text_trimmed = text_lower.trim();
+
+    // Strong indicators of speaker change
+    let is_response = text_trimmed.starts_with("yeah")
+        || text_trimmed.starts_with("yes")
+        || text_trimmed.starts_with("right")
+        || text_trimmed.starts_with("exactly")
+        || text_trimmed.starts_with("absolutely")
+        || text_trimmed.starts_with("no,")
+        || text_trimmed.starts_with("no ")
+        || text_trimmed.starts_with("well,")
+        || text_trimmed.starts_with("so,")
+        || text_trimmed.starts_with("okay")
+        || text_trimmed.starts_with("i think")
+        || text_trimmed.starts_with("i believe")
+        || text_trimmed.starts_with("i agree")
+        || text_trimmed.starts_with("i disagree");
+
+    let is_question = text_trimmed.ends_with('?')
+        || text_trimmed.starts_with("what")
+        || text_trimmed.starts_with("how")
+        || text_trimmed.starts_with("why")
+        || text_trimmed.starts_with("when")
+        || text_trimmed.starts_with("where")
+        || text_trimmed.starts_with("do you")
+        || text_trimmed.starts_with("are you")
+        || text_trimmed.starts_with("can you")
+        || text_trimmed.starts_with("would you");
+
+    // Timing-based decision
+    // Significant gap almost always means speaker change
+    if gap > 2.0 {
+        return true;
+    }
+
+    // Medium gap with linguistic indicator
+    if gap > 1.0 && (is_response || is_question) {
+        return true;
+    }
+
+    // For very short conversations, alternate more aggressively
+    if total_turns <= 10 && turn_idx % 2 == 1 && gap > 0.5 {
+        return true;
+    }
+
+    // For longer conversations, use more conservative approach
+    // Change speaker on noticeable pauses
+    if gap > 1.5 {
+        return true;
+    }
+
+    false
 }
 
 // Store diarization results in memory (in production, this would be in the database)
@@ -218,8 +390,8 @@ pub async fn retranscribe_with_diarization<R: Runtime>(
         })
         .collect();
 
-    // Run speaker diarization
-    let (speaker_labels, speakers) = assign_speakers_heuristic(&segments);
+    // Run speaker diarization using turn-based algorithm
+    let (speaker_labels, speakers) = assign_speakers_turn_based(&segments);
 
     log::info!(
         "Diarization complete: {} speakers detected, {} segments labeled",
