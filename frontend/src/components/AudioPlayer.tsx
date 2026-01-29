@@ -2,8 +2,7 @@
 
 import React, { useRef, useState, useEffect, forwardRef, useImperativeHandle, useCallback } from 'react';
 import { Play, Pause, User } from 'lucide-react';
-import { convertFileSrc } from '@tauri-apps/api/core';
-import { readFile } from '@tauri-apps/plugin-fs';
+import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 
 interface AudioPlayerProps {
   audioFilePath: string | null;
@@ -22,6 +21,16 @@ function formatTime(seconds: number): string {
   const mins = Math.floor(seconds / 60);
   const secs = Math.floor(seconds % 60);
   return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+}
+
+// Helper to convert base64 to Uint8Array
+function base64ToUint8Array(base64: string): Uint8Array {
+  const binaryString = atob(base64);
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes;
 }
 
 export const AudioPlayer = forwardRef<AudioPlayerRef, AudioPlayerProps>(
@@ -66,27 +75,34 @@ export const AudioPlayer = forwardRef<AudioPlayerRef, AudioPlayerProps>(
       
       let blobUrl: string | null = null;
 
-      // Load audio file using Tauri fs plugin and create blob URL
+      // Load audio file using Tauri command and create blob URL
       const loadAudioFile = async () => {
         try {
-          console.log('🔊 [AudioPlayer] Step 1: Reading file with Tauri fs plugin...');
+          console.log('🔊 [AudioPlayer] Step 1: Reading file via Tauri command...');
           
-          // Read file as binary using Tauri's fs plugin
-          const fileData = await readFile(audioFilePath);
-          console.log('🔊 [AudioPlayer] Step 2: File read successfully, size:', fileData.length, 'bytes');
+          // Read file as base64 using our Tauri command
+          const base64Data = await invoke<string>('get_meeting_audio_data', {
+            audioPath: audioFilePath
+          });
+          console.log('🔊 [AudioPlayer] Step 2: Received base64 data, length:', base64Data.length, 'chars');
           
-          if (fileData.length === 0) {
-            throw new Error('File is empty (0 bytes)');
+          if (!base64Data || base64Data.length === 0) {
+            throw new Error('Received empty data from server');
           }
           
-          // Create a blob from the file data
-          console.log('🔊 [AudioPlayer] Step 3: Creating blob...');
-          const blob = new Blob([fileData], { type: 'audio/mp4' });
+          // Convert base64 to Uint8Array
+          console.log('🔊 [AudioPlayer] Step 3: Converting base64 to binary...');
+          const binaryData = base64ToUint8Array(base64Data);
+          console.log('🔊 [AudioPlayer] Step 4: Binary data size:', binaryData.length, 'bytes');
+          
+          // Create a blob from the binary data
+          console.log('🔊 [AudioPlayer] Step 5: Creating blob...');
+          const blob = new Blob([binaryData], { type: 'audio/mp4' });
           blobUrl = URL.createObjectURL(blob);
-          console.log('🔊 [AudioPlayer] Step 4: Blob URL created:', blobUrl);
+          console.log('🔊 [AudioPlayer] Step 6: Blob URL created:', blobUrl);
           
           // Create audio element
-          console.log('🔊 [AudioPlayer] Step 5: Creating Audio element...');
+          console.log('🔊 [AudioPlayer] Step 7: Creating Audio element...');
           const audio = new Audio();
           audio.src = blobUrl;
 
@@ -123,7 +139,7 @@ export const AudioPlayer = forwardRef<AudioPlayerRef, AudioPlayerProps>(
           audioRef.current = audio;
         } catch (err) {
           const errMsg = err instanceof Error ? err.message : String(err);
-          console.error('🔊 [AudioPlayer] ❌ Failed to read file with fs plugin:', errMsg);
+          console.error('🔊 [AudioPlayer] ❌ Failed to load audio:', errMsg);
           
           // Fallback: try using convertFileSrc (asset protocol)
           console.log('🔊 [AudioPlayer] Trying fallback with asset protocol...');

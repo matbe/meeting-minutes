@@ -634,8 +634,9 @@ pub fn run() {
             api::api_save_custom_openai_config,
             api::api_get_custom_openai_config,
             api::api_test_custom_openai_connection,
-            // Audio playback command
+            // Audio playback commands
             api::get_meeting_audio_path,
+            api::get_meeting_audio_data,
             // Summary commands
             summary::api_process_transcript,
             summary::api_get_summary,
