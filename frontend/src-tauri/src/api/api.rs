@@ -138,6 +138,11 @@ pub struct MeetingTranscript {
     pub audio_end_time: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration: Option<f64>,
+    // Speaker diarization fields
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub speaker_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub speaker_label: Option<String>,
 }
 
 /// Meeting metadata without transcripts (for pagination)

@@ -404,8 +404,32 @@ pub async fn retranscribe_with_diarization<R: Runtime>(
         let mut cache = DIARIZATION_CACHE
             .lock()
             .map_err(|e| format!("Cache lock error: {}", e))?;
-        cache.insert(meeting_id.clone(), (speaker_labels.clone(), speakers));
+        cache.insert(meeting_id.clone(), (speaker_labels.clone(), speakers.clone()));
     }
+
+    // Persist speaker labels and update transcripts in database
+    for label in &speaker_labels {
+        if let Err(e) = update_transcript_speaker_label(
+            pool,
+            &meeting_id,
+            &label.segment_id,
+            &label.speaker_id,
+            &label.speaker_label,
+        )
+        .await
+        {
+            log::error!("Failed to persist speaker label for segment {}: {}", label.segment_id, e);
+        }
+    }
+
+    // Save initial speaker labels
+    for speaker in &speakers {
+        if let Err(e) = save_speaker_label_to_db(pool, &meeting_id, &speaker.id, &speaker.label).await {
+            log::error!("Failed to save speaker label: {}", e);
+        }
+    }
+
+    log::info!("Persisted {} speaker labels to database for meeting {}", speaker_labels.len(), meeting_id);
 
     Ok(speaker_labels)
 }
@@ -463,6 +487,7 @@ pub async fn get_speaker_labels(meeting_id: String) -> Result<Vec<SpeakerLabel>,
 pub async fn update_speaker_labels(
     meeting_id: String,
     speakers: Vec<Speaker>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<Vec<SpeakerLabel>, String> {
     log::info!(
         "update_speaker_labels called for meeting: {} with {} speakers",
@@ -496,11 +521,76 @@ pub async fn update_speaker_labels(
             }
         }
 
-        log::info!("Updated speaker labels for meeting {}", meeting_id);
+        // Persist speaker labels to database
+        let pool = state.db_manager.pool();
+        for speaker in &speakers {
+            if let Err(e) = save_speaker_label_to_db(pool, &meeting_id, &speaker.id, &speaker.label).await {
+                log::error!("Failed to persist speaker label: {}", e);
+            }
+        }
+
+        // Update transcript records with speaker labels
+        for label in labels.iter() {
+            if let Err(e) = update_transcript_speaker_label(pool, &meeting_id, &label.segment_id, &label.speaker_id, &label.speaker_label).await {
+                log::error!("Failed to update transcript speaker label: {}", e);
+            }
+        }
+
+        log::info!("Updated and persisted speaker labels for meeting {}", meeting_id);
         return Ok(labels.clone());
     }
 
     Err("No diarization results found. Run 'Full enhance' first.".to_string())
+}
+
+/// Save a speaker label mapping to the database
+async fn save_speaker_label_to_db(
+    pool: &sqlx::SqlitePool,
+    meeting_id: &str,
+    speaker_id: &str,
+    speaker_label: &str,
+) -> Result<(), sqlx::Error> {
+    let now = chrono::Utc::now().to_rfc3339();
+    
+    sqlx::query(
+        r#"
+        INSERT INTO speaker_labels (meeting_id, speaker_id, speaker_label, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(meeting_id, speaker_id) DO UPDATE SET
+            speaker_label = excluded.speaker_label,
+            updated_at = excluded.updated_at
+        "#
+    )
+    .bind(meeting_id)
+    .bind(speaker_id)
+    .bind(speaker_label)
+    .bind(&now)
+    .bind(&now)
+    .execute(pool)
+    .await?;
+    
+    Ok(())
+}
+
+/// Update a transcript record with speaker information
+async fn update_transcript_speaker_label(
+    pool: &sqlx::SqlitePool,
+    meeting_id: &str,
+    segment_id: &str,
+    speaker_id: &str,
+    speaker_label: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE transcripts SET speaker_id = ?, speaker_label = ? WHERE meeting_id = ? AND id = ?"
+    )
+    .bind(speaker_id)
+    .bind(speaker_label)
+    .bind(meeting_id)
+    .bind(segment_id)
+    .execute(pool)
+    .await?;
+    
+    Ok(())
 }
 
 /// Get a speaker's audio sample start time for playback
@@ -527,4 +617,48 @@ pub async fn get_speaker_audio_sample(
     }
 
     Ok(None)
+}
+
+/// Load persisted speaker labels from database into cache
+#[command]
+pub async fn load_persisted_speaker_labels(
+    meeting_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<SpeakerLabel>, String> {
+    log::info!("load_persisted_speaker_labels called for meeting: {}", meeting_id);
+
+    let pool = state.db_manager.pool();
+
+    // Load speaker labels from database
+    let rows: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT speaker_id, speaker_label, meeting_id FROM speaker_labels WHERE meeting_id = ?"
+    )
+    .bind(&meeting_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| format!("Failed to load speaker labels: {}", e))?;
+
+    // Load transcripts with speaker info
+    let transcripts: Vec<(String, Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT id, speaker_id, speaker_label FROM transcripts WHERE meeting_id = ? AND speaker_id IS NOT NULL"
+    )
+    .bind(&meeting_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| format!("Failed to load transcripts: {}", e))?;
+
+    // Build speaker labels from persisted data
+    let speaker_labels: Vec<SpeakerLabel> = transcripts
+        .iter()
+        .filter_map(|(id, speaker_id, speaker_label)| {
+            speaker_id.as_ref().map(|sid| SpeakerLabel {
+                segment_id: id.clone(),
+                speaker_id: sid.clone(),
+                speaker_label: speaker_label.clone().unwrap_or_else(|| format!("Speaker {}", &sid[sid.len().saturating_sub(1)..])),
+            })
+        })
+        .collect();
+
+    log::info!("Loaded {} persisted speaker labels for meeting {}", speaker_labels.len(), meeting_id);
+    Ok(speaker_labels)
 }

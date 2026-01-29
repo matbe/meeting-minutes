@@ -35,6 +35,9 @@ pub struct Transcript {
     pub audio_start_time: Option<f64>,
     pub audio_end_time: Option<f64>,
     pub duration: Option<f64>,
+    // Speaker diarization fields
+    pub speaker_id: Option<String>,
+    pub speaker_label: Option<String>,
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
@@ -127,4 +130,15 @@ pub struct TranscriptSetting {
     #[sqlx(rename = "openaiApiKey")]
     #[serde(rename = "openaiApiKey")]
     pub openai_api_key: Option<String>,
+}
+
+/// Represents a speaker label mapping for a meeting
+#[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
+pub struct SpeakerLabel {
+    pub id: i64,
+    pub meeting_id: String,
+    pub speaker_id: String,
+    pub speaker_label: String,
+    pub created_at: String,
+    pub updated_at: String,
 }
