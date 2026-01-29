@@ -23,14 +23,11 @@ function formatTime(seconds: number): string {
   return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 }
 
-// Helper to convert base64 to Uint8Array
-function base64ToUint8Array(base64: string): Uint8Array {
-  const binaryString = atob(base64);
-  const bytes = new Uint8Array(binaryString.length);
-  for (let i = 0; i < binaryString.length; i++) {
-    bytes[i] = binaryString.charCodeAt(i);
-  }
-  return bytes;
+// Helper to convert base64 to Blob using fetch API (clean and type-safe)
+async function base64ToBlob(base64: string, mimeType: string): Promise<Blob> {
+  const dataUrl = `data:${mimeType};base64,${base64}`;
+  const response = await fetch(dataUrl);
+  return response.blob();
 }
 
 export const AudioPlayer = forwardRef<AudioPlayerRef, AudioPlayerProps>(
@@ -90,14 +87,13 @@ export const AudioPlayer = forwardRef<AudioPlayerRef, AudioPlayerProps>(
             throw new Error('Received empty data from server');
           }
           
-          // Convert base64 to Uint8Array
-          console.log('🔊 [AudioPlayer] Step 3: Converting base64 to binary...');
-          const binaryData = base64ToUint8Array(base64Data);
-          console.log('🔊 [AudioPlayer] Step 4: Binary data size:', binaryData.length, 'bytes');
+          // Convert base64 to Blob using fetch API (clean and type-safe)
+          console.log('🔊 [AudioPlayer] Step 3: Converting base64 to blob...');
+          const blob = await base64ToBlob(base64Data, 'audio/mp4');
+          console.log('🔊 [AudioPlayer] Step 4: Blob created, size:', blob.size, 'bytes');
           
-          // Create a blob from the binary data
-          console.log('🔊 [AudioPlayer] Step 5: Creating blob...');
-          const blob = new Blob([binaryData], { type: 'audio/mp4' });
+          // Create blob URL
+          console.log('🔊 [AudioPlayer] Step 5: Creating blob URL...');
           blobUrl = URL.createObjectURL(blob);
           console.log('🔊 [AudioPlayer] Step 6: Blob URL created:', blobUrl);
           
