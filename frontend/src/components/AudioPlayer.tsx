@@ -23,11 +23,20 @@ function formatTime(seconds: number): string {
   return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 }
 
-// Helper to convert base64 to Blob using fetch API (clean and type-safe)
-async function base64ToBlob(base64: string, mimeType: string): Promise<Blob> {
-  const dataUrl = `data:${mimeType};base64,${base64}`;
-  const response = await fetch(dataUrl);
-  return response.blob();
+// Helper to convert base64 to Blob using atob and ArrayBuffer (handles large files)
+function base64ToBlob(base64: string, mimeType: string): Blob {
+  // Decode base64 to binary string
+  const binaryString = atob(base64);
+  const length = binaryString.length;
+  
+  // Create a Uint8Array from the binary string
+  const bytes = new Uint8Array(length);
+  for (let i = 0; i < length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  
+  // Create blob from the ArrayBuffer (using .buffer property)
+  return new Blob([bytes.buffer], { type: mimeType });
 }
 
 export const AudioPlayer = forwardRef<AudioPlayerRef, AudioPlayerProps>(
@@ -87,9 +96,9 @@ export const AudioPlayer = forwardRef<AudioPlayerRef, AudioPlayerProps>(
             throw new Error('Received empty data from server');
           }
           
-          // Convert base64 to Blob using fetch API (clean and type-safe)
+          // Convert base64 to Blob using atob (handles large files better than fetch)
           console.log('🔊 [AudioPlayer] Step 3: Converting base64 to blob...');
-          const blob = await base64ToBlob(base64Data, 'audio/mp4');
+          const blob = base64ToBlob(base64Data, 'audio/mp4');
           console.log('🔊 [AudioPlayer] Step 4: Blob created, size:', blob.size, 'bytes');
           
           // Create blob URL
