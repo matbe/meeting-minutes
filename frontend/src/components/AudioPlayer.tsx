@@ -23,13 +23,19 @@ function formatTime(seconds: number): string {
 }
 
 // Convert file path to Tauri asset URL
-// The asset protocol expects the path without encoding directory separators
+// In Tauri 2.x, asset protocol uses https://asset.localhost/<encoded-path>
 function buildAssetUrl(filePath: string): string {
   // On Windows, convert backslashes to forward slashes
   const normalizedPath = filePath.replace(/\\/g, '/');
-  // Remove leading slash if present (Windows paths start with drive letter)
+  // Ensure path starts with /
   const cleanPath = normalizedPath.startsWith('/') ? normalizedPath : '/' + normalizedPath;
-  return `asset://localhost${cleanPath}`;
+  // URL-encode the path, but preserve forward slashes
+  const encodedPath = cleanPath
+    .split('/')
+    .map(segment => encodeURIComponent(segment))
+    .join('/');
+  // Use https://asset.localhost for Tauri 2.x
+  return `https://asset.localhost${encodedPath}`;
 }
 
 export const AudioPlayer = forwardRef<AudioPlayerRef, AudioPlayerProps>(
@@ -75,15 +81,17 @@ export const AudioPlayer = forwardRef<AudioPlayerRef, AudioPlayerProps>(
       
       // Convert file path to Tauri asset URL (handles path separators correctly)
       const assetUrl = buildAssetUrl(audioFilePath);
+      console.log('🔊 Loading audio from:', assetUrl);
       audio.src = assetUrl;
 
       audio.onloadedmetadata = () => {
+        console.log('🔊 Audio loaded successfully, duration:', audio.duration);
         setDuration(audio.duration);
         setIsLoading(false);
       };
 
       audio.onerror = (e) => {
-        console.error('Audio loading error:', e);
+        console.error('🔊 Audio loading error:', e, 'URL:', assetUrl);
         setError('Failed to load audio file');
         setIsLoading(false);
       };
