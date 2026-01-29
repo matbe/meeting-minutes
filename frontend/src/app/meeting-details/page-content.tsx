@@ -137,6 +137,47 @@ export default function PageContent({
     Analytics.trackPageView('meeting_details');
   }, []);
 
+  // Load persisted speaker labels when meeting loads
+  useEffect(() => {
+    const loadPersistedSpeakers = async () => {
+      console.log('🎤 [SpeakerLoad] Loading persisted speaker labels for meeting:', meeting.id);
+      
+      try {
+        // Load persisted speaker labels from database
+        const speakerLabels = await invoke<SpeakerLabel[]>('load_persisted_speaker_labels', { 
+          meetingId: meeting.id 
+        });
+        
+        if (speakerLabels.length > 0) {
+          console.log('🎤 [SpeakerLoad] ✅ Found', speakerLabels.length, 'persisted speaker labels');
+          
+          // Build segment -> speaker mapping
+          const newSegmentSpeakerMap: Record<string, { speakerId: string; speakerLabel: string }> = {};
+          speakerLabels.forEach(label => {
+            newSegmentSpeakerMap[label.segmentId] = {
+              speakerId: label.speakerId,
+              speakerLabel: label.speakerLabel,
+            };
+          });
+          setSegmentSpeakerMap(newSegmentSpeakerMap);
+          
+          // Also load speakers for the modal
+          const detectedSpeakers = await invoke<Speaker[]>('get_meeting_speakers', { meetingId: meeting.id });
+          if (detectedSpeakers.length > 0) {
+            setSpeakers(detectedSpeakers);
+          }
+        } else {
+          console.log('🎤 [SpeakerLoad] No persisted speaker labels found');
+        }
+      } catch (err) {
+        console.log('🎤 [SpeakerLoad] Could not load speaker labels:', err);
+        // Not an error - just means no diarization was done yet
+      }
+    };
+
+    loadPersistedSpeakers();
+  }, [meeting.id]);
+
   // Load audio file path for the meeting
   useEffect(() => {
     const loadAudioPath = async () => {
@@ -313,7 +354,7 @@ export default function PageContent({
     
     // Apply speaker labels from diarization results
     return segments.map(segment => {
-      // Check if we have speaker info for this segment from diarization
+      // Check if we have speaker info for this segment from diarization cache
       const speakerInfo = segmentSpeakerMap[segment.id];
       
       if (speakerInfo) {
@@ -324,7 +365,12 @@ export default function PageContent({
         };
       }
       
-      // No diarization result for this segment - keep original (will show "Guest")
+      // Check if segment already has speaker info from database
+      if (segment.speaker_id && segment.speaker_label) {
+        return segment;
+      }
+      
+      // No speaker info - will show "Guest"
       return segment;
     });
   }, [segments, segmentSpeakerMap]);
