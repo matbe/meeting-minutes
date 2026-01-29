@@ -115,11 +115,11 @@ export function TranscriptPanel({
         </div>
       )}
       
-      {/* Audio Player - shown when audio file exists */}
-      {audioFilePath && (
+      {/* Audio Player - always shown when there are transcripts */}
+      {!isRecording && convertedSegments.length > 0 && (
         <AudioPlayer
           ref={audioPlayerRef}
-          audioFilePath={audioFilePath}
+          audioFilePath={audioFilePath ?? null}
           onTimeUpdate={onAudioTimeUpdate}
         />
       )}
