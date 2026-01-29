@@ -252,7 +252,20 @@ export default function PageContent({
       toast.success(`Speaker detection complete! Found ${detectedSpeakers.length} speakers.`);
     } catch (err) {
       console.error('Failed to retranscribe with diarization:', err);
-      toast.error('Failed to detect speakers. Please try again.');
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      
+      // Show specific error messages for common issues
+      if (errorMessage.includes('Backend server not running') || errorMessage.includes('port 5167')) {
+        toast.error('Backend server not running. Please start the Meetily backend service.');
+      } else if (errorMessage.includes('Hugging Face token') || errorMessage.includes('HF_TOKEN')) {
+        toast.error('Please configure your Hugging Face token in Settings → Speakers.');
+      } else if (errorMessage.includes('model') && errorMessage.includes('load')) {
+        toast.error('Please load the diarization model in Settings → Speakers first.');
+      } else if (errorMessage.includes('pyannote') || errorMessage.includes('dependencies')) {
+        toast.error('Speaker diarization requires pyannote.audio. Please install dependencies.');
+      } else {
+        toast.error(`Speaker detection failed: ${errorMessage}`);
+      }
     } finally {
       setIsEnhancing(false);
     }

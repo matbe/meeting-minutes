@@ -132,11 +132,32 @@ async fn call_diarization_api(audio_path: &str, meeting_id: &str) -> Result<Diar
         .timeout(std::time::Duration::from_secs(600)) // 10 minute timeout for long audio
         .send()
         .await
-        .map_err(|e| format!("Failed to call diarization API: {}", e))?;
+        .map_err(|e| {
+            if e.is_connect() {
+                "Backend server not running. Please start the Meetily backend service (port 5167).".to_string()
+            } else if e.is_timeout() {
+                "Diarization timed out. The audio file may be too long.".to_string()
+            } else {
+                format!("Failed to connect to diarization service: {}", e)
+            }
+        })?;
     
     if !response.status().is_success() {
+        let status = response.status();
         let error_text = response.text().await.unwrap_or_default();
-        return Err(format!("Diarization API error: {}", error_text));
+        
+        // Parse common error cases
+        if status.as_u16() == 503 {
+            return Err("Speaker diarization dependencies not installed. Please install pyannote.audio.".to_string());
+        }
+        if error_text.contains("HF_TOKEN") || error_text.contains("Hugging Face") || error_text.contains("token") {
+            return Err("Hugging Face token not configured. Please set your token in Settings → Speakers.".to_string());
+        }
+        if error_text.contains("model") && error_text.contains("load") {
+            return Err("Diarization model not loaded. Please load the model in Settings → Speakers.".to_string());
+        }
+        
+        return Err(format!("Diarization failed: {}", error_text));
     }
     
     let api_response: DiarizationApiResponse = response
@@ -146,6 +167,69 @@ async fn call_diarization_api(audio_path: &str, meeting_id: &str) -> Result<Diar
     
     api_response.result
         .ok_or_else(|| "Diarization returned no result".to_string())
+}
+
+/// Fallback heuristic-based speaker assignment when backend is unavailable
+fn assign_speakers_heuristic(
+    transcripts: &[(String, String, Option<f64>, Option<f64>)], // (id, text, start, end)
+) -> (Vec<SpeakerLabel>, Vec<Speaker>) {
+    // Simple turn-based heuristic: assign speakers based on timing gaps
+    const TURN_GAP_THRESHOLD: f64 = 1.5; // Gap suggesting speaker change
+    
+    let mut speaker_labels = Vec::new();
+    let mut speaker_stats: HashMap<String, SpeakerStats> = HashMap::new();
+    let mut current_speaker = 1;
+    let mut last_end_time: Option<f64> = None;
+    
+    for (seg_id, _text, audio_start, audio_end) in transcripts {
+        let t_start = audio_start.unwrap_or(0.0);
+        let t_end = audio_end.unwrap_or(t_start + 3.0);
+        
+        // Check for speaker change based on gap
+        if let Some(last_end) = last_end_time {
+            let gap = t_start - last_end;
+            if gap > TURN_GAP_THRESHOLD {
+                // Alternate between 2 speakers
+                current_speaker = if current_speaker == 1 { 2 } else { 1 };
+            }
+        }
+        
+        let speaker_id = format!("SPEAKER_0{}", current_speaker - 1);
+        let speaker_label = format!("Speaker {}", current_speaker);
+        let duration = t_end - t_start;
+        
+        // Update speaker stats
+        let stats = speaker_stats.entry(speaker_id.clone()).or_insert(SpeakerStats {
+            id: speaker_id.clone(),
+            label: speaker_label.clone(),
+            segment_count: 0,
+            total_duration: 0.0,
+            first_audio_start: Some(t_start),
+        });
+        stats.segment_count += 1;
+        stats.total_duration += duration;
+        
+        speaker_labels.push(SpeakerLabel {
+            segment_id: seg_id.clone(),
+            speaker_id: speaker_id.clone(),
+            speaker_label,
+        });
+        
+        last_end_time = Some(t_end);
+    }
+    
+    let speakers: Vec<Speaker> = speaker_stats
+        .into_values()
+        .map(|stats| Speaker {
+            id: stats.id,
+            label: stats.label,
+            segments: stats.segment_count,
+            total_duration: stats.total_duration,
+            sample_audio_start: stats.first_audio_start,
+        })
+        .collect();
+    
+    (speaker_labels, speakers)
 }
 
 /// Assign speakers to transcript segments based on diarization results
@@ -221,6 +305,7 @@ fn assign_speakers_from_diarization(
 
 /// Re-transcribe the meeting audio with speaker diarization enabled.
 /// This calls the Python backend which uses pyannote.audio for voice-based speaker recognition.
+/// Falls back to heuristic-based diarization if the backend is unavailable.
 #[command]
 pub async fn retranscribe_with_diarization<R: Runtime>(
     _app: AppHandle<R>,
@@ -233,10 +318,6 @@ pub async fn retranscribe_with_diarization<R: Runtime>(
     );
 
     let pool = state.db_manager.pool();
-
-    // Get audio file path for the meeting
-    let audio_path = get_audio_path_for_meeting(pool, &meeting_id).await?;
-    log::info!("Found audio file: {}", audio_path);
 
     // Get transcripts for the meeting (needed for mapping speakers to segments)
     let transcripts =
@@ -253,16 +334,6 @@ pub async fn retranscribe_with_diarization<R: Runtime>(
         transcripts.0.len()
     );
 
-    // Call Python backend for actual diarization using pyannote.audio
-    log::info!("Calling pyannote.audio diarization via Python backend...");
-    let diarization_result = call_diarization_api(&audio_path, &meeting_id).await?;
-    
-    log::info!(
-        "pyannote.audio detected {} speakers in {:.1}s of audio",
-        diarization_result.num_speakers,
-        diarization_result.duration
-    );
-
     // Convert to format needed for speaker assignment
     let segments: Vec<(String, String, Option<f64>, Option<f64>)> = transcripts
         .0
@@ -277,14 +348,55 @@ pub async fn retranscribe_with_diarization<R: Runtime>(
         })
         .collect();
 
-    // Assign speakers to transcript segments based on diarization results
-    let (speaker_labels, speakers) = assign_speakers_from_diarization(&diarization_result, &segments);
+    // Try to get audio file path for pyannote.audio diarization
+    let audio_path_result = get_audio_path_for_meeting(pool, &meeting_id).await;
+    
+    let (speaker_labels, speakers, use_fallback) = match audio_path_result {
+        Ok(audio_path) => {
+            log::info!("Found audio file: {}", audio_path);
+            
+            // Try Python backend for actual diarization using pyannote.audio
+            log::info!("Calling pyannote.audio diarization via Python backend...");
+            match call_diarization_api(&audio_path, &meeting_id).await {
+                Ok(diarization_result) => {
+                    log::info!(
+                        "pyannote.audio detected {} speakers in {:.1}s of audio",
+                        diarization_result.num_speakers,
+                        diarization_result.duration
+                    );
+                    
+                    // Assign speakers to transcript segments based on diarization results
+                    let (labels, spks) = assign_speakers_from_diarization(&diarization_result, &segments);
+                    (labels, spks, false)
+                }
+                Err(e) => {
+                    log::warn!("pyannote.audio diarization failed: {}. Using heuristic fallback.", e);
+                    // Return the specific error to the user instead of silently falling back
+                    return Err(e);
+                }
+            }
+        }
+        Err(e) => {
+            log::warn!("Could not find audio file: {}. Using heuristic fallback.", e);
+            // Use heuristic fallback when no audio file is available
+            let (labels, spks) = assign_speakers_heuristic(&segments);
+            (labels, spks, true)
+        }
+    };
 
-    log::info!(
-        "Speaker assignment complete: {} speakers, {} segments labeled",
-        speakers.len(),
-        speaker_labels.len()
-    );
+    if use_fallback {
+        log::info!(
+            "Heuristic fallback: assigned {} speakers to {} segments",
+            speakers.len(),
+            speaker_labels.len()
+        );
+    } else {
+        log::info!(
+            "Speaker assignment complete: {} speakers, {} segments labeled",
+            speakers.len(),
+            speaker_labels.len()
+        );
+    }
 
     // Cache the results
     {
