@@ -20,6 +20,8 @@ interface AudioPlayerProps {
 export interface AudioPlayerRef {
   seekTo: (seconds: number) => void;
   getCurrentTime: () => number;
+  play: () => void;
+  pause: () => void;
 }
 
 // Helper function to format time as MM:SS
@@ -70,6 +72,12 @@ export const AudioPlayer = forwardRef<AudioPlayerRef, AudioPlayerProps>(
       },
       getCurrentTime: () => {
         return audioRef.current?.currentTime ?? 0;
+      },
+      play: () => {
+        audioRef.current?.play().catch(e => console.error('Play failed:', e));
+      },
+      pause: () => {
+        audioRef.current?.pause();
       },
     }));
 

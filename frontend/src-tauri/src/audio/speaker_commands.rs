@@ -1,7 +1,7 @@
 //! Speaker diarization commands for tauri
 //!
 //! Provides speaker recognition and labeling functionality.
-//! Uses timing-based turn detection for speaker assignment.
+//! Calls Python backend for pyannote.audio-based voice recognition.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -47,79 +47,164 @@ struct SpeakerStats {
     first_audio_start: Option<f64>,
 }
 
-/// Represents a turn in the conversation (a continuous speaking segment by one speaker)
-#[derive(Debug, Clone)]
-struct ConversationTurn {
-    start_time: f64,
-    end_time: f64,
-    segment_indices: Vec<usize>,
+/// Response from the Python diarization API
+#[derive(Debug, Clone, Deserialize)]
+struct DiarizationApiResponse {
+    status: String,
+    result: Option<DiarizationResult>,
 }
 
-/// Performs turn-based speaker diarization on transcript segments.
-///
-/// This algorithm:
-/// 1. Groups consecutive segments into "turns" based on timing gaps
-/// 2. Assigns speakers to turns using an alternating model (common in conversations)
-/// 3. Handles overlapping speech and short pauses within same speaker's turn
-fn assign_speakers_turn_based(
-    segments: &[(String, String, Option<f64>, Option<f64>)], // (id, text, audio_start, audio_end)
-) -> (Vec<SpeakerLabel>, Vec<Speaker>) {
-    if segments.is_empty() {
-        return (vec![], vec![]);
+/// Diarization result from pyannote.audio
+#[derive(Debug, Clone, Deserialize)]
+struct DiarizationResult {
+    segments: Vec<DiarizationSegment>,
+    num_speakers: usize,
+    duration: f64,
+}
+
+/// A speaker segment from diarization
+#[derive(Debug, Clone, Deserialize)]
+struct DiarizationSegment {
+    speaker_id: String,
+    start_time: f64,
+    end_time: f64,
+}
+
+// Store diarization results in memory (in production, this would be in the database)
+use std::sync::LazyLock;
+use std::sync::Mutex;
+
+static DIARIZATION_CACHE: LazyLock<Mutex<HashMap<String, (Vec<SpeakerLabel>, Vec<Speaker>)>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Get the audio file path for a meeting
+async fn get_audio_path_for_meeting(pool: &sqlx::SqlitePool, meeting_id: &str) -> Result<String, String> {
+    // Get meeting metadata to find folder path
+    let meeting = MeetingsRepository::get_meeting_metadata(pool, meeting_id)
+        .await
+        .map_err(|e| format!("Failed to get meeting: {}", e))?
+        .ok_or_else(|| format!("Meeting not found: {}", meeting_id))?;
+    
+    let folder_path = meeting.folder_path
+        .ok_or_else(|| "Meeting has no folder path".to_string())?;
+    
+    // Look for audio file in the folder
+    let folder = std::path::Path::new(&folder_path);
+    
+    // Check for audio.mp4 first (default name)
+    let audio_mp4 = folder.join("audio.mp4");
+    if audio_mp4.exists() {
+        return Ok(audio_mp4.to_string_lossy().to_string());
     }
-
-    // Step 1: Group segments into turns based on timing
-    let turns = group_into_turns(segments);
-
-    log::info!(
-        "Detected {} conversation turns from {} segments",
-        turns.len(),
-        segments.len()
-    );
-
-    // Step 2: Assign speakers to turns using alternating model
-    let turn_speakers = assign_speakers_to_turns(&turns, segments);
-
-    // Step 3: Build speaker labels and statistics
-    let mut speaker_stats: HashMap<String, SpeakerStats> = HashMap::new();
-    let mut speaker_labels = Vec::new();
-
-    for (turn_idx, turn) in turns.iter().enumerate() {
-        let speaker_id = &turn_speakers[turn_idx];
-        let speaker_num = speaker_id.chars().last().unwrap_or('1');
-
-        for &seg_idx in &turn.segment_indices {
-            let (segment_id, _text, audio_start, audio_end) = &segments[seg_idx];
-
-            let duration = match (audio_start, audio_end) {
-                (Some(start), Some(end)) => end - start,
-                _ => 3.0,
-            };
-
-            let stats = speaker_stats
-                .entry(speaker_id.clone())
-                .or_insert(SpeakerStats {
-                    id: speaker_id.clone(),
-                    label: format!("Speaker {}", speaker_num),
-                    segment_count: 0,
-                    total_duration: 0.0,
-                    first_audio_start: *audio_start,
-                });
-
-            stats.segment_count += 1;
-            stats.total_duration += duration;
-            if stats.first_audio_start.is_none() {
-                stats.first_audio_start = *audio_start;
+    
+    // Check for other audio formats
+    const AUDIO_EXTENSIONS: &[&str] = &["mp4", "wav", "m4a", "webm", "ogg", "flac", "aac"];
+    
+    let entries = std::fs::read_dir(folder)
+        .map_err(|e| format!("Failed to read folder: {}", e))?;
+    
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if let Some(ext) = path.extension() {
+            if AUDIO_EXTENSIONS.contains(&ext.to_string_lossy().to_lowercase().as_str()) {
+                return Ok(path.to_string_lossy().to_string());
             }
-
-            speaker_labels.push(SpeakerLabel {
-                segment_id: segment_id.clone(),
-                speaker_id: speaker_id.clone(),
-                speaker_label: stats.label.clone(),
-            });
         }
     }
+    
+    Err("No audio file found for meeting".to_string())
+}
 
+/// Call the Python backend diarization API
+async fn call_diarization_api(audio_path: &str, meeting_id: &str) -> Result<DiarizationResult, String> {
+    let client = reqwest::Client::new();
+    
+    let request_body = serde_json::json!({
+        "audio_path": audio_path,
+        "meeting_id": meeting_id
+    });
+    
+    log::info!("Calling diarization API for audio: {}", audio_path);
+    
+    let response = client
+        .post("http://localhost:5167/diarization/process")
+        .json(&request_body)
+        .timeout(std::time::Duration::from_secs(600)) // 10 minute timeout for long audio
+        .send()
+        .await
+        .map_err(|e| format!("Failed to call diarization API: {}", e))?;
+    
+    if !response.status().is_success() {
+        let error_text = response.text().await.unwrap_or_default();
+        return Err(format!("Diarization API error: {}", error_text));
+    }
+    
+    let api_response: DiarizationApiResponse = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse diarization response: {}", e))?;
+    
+    api_response.result
+        .ok_or_else(|| "Diarization returned no result".to_string())
+}
+
+/// Assign speakers to transcript segments based on diarization results
+fn assign_speakers_from_diarization(
+    diarization: &DiarizationResult,
+    transcripts: &[(String, String, Option<f64>, Option<f64>)], // (id, text, start, end)
+) -> (Vec<SpeakerLabel>, Vec<Speaker>) {
+    let mut speaker_labels = Vec::new();
+    let mut speaker_stats: HashMap<String, SpeakerStats> = HashMap::new();
+    
+    for (seg_id, _text, audio_start, audio_end) in transcripts {
+        let t_start = audio_start.unwrap_or(0.0);
+        let t_end = audio_end.unwrap_or(t_start + 3.0);
+        
+        // Find the speaker with most overlap for this transcript segment
+        let mut best_speaker: Option<&str> = None;
+        let mut best_overlap = 0.0f64;
+        
+        for diar_seg in &diarization.segments {
+            let overlap_start = t_start.max(diar_seg.start_time);
+            let overlap_end = t_end.min(diar_seg.end_time);
+            let overlap = (overlap_end - overlap_start).max(0.0);
+            
+            if overlap > best_overlap {
+                best_overlap = overlap;
+                best_speaker = Some(&diar_seg.speaker_id);
+            }
+        }
+        
+        let speaker_id = best_speaker.unwrap_or("SPEAKER_00").to_string();
+        let speaker_num = speaker_id.chars().last()
+            .and_then(|c| c.to_digit(10))
+            .unwrap_or(0) as usize + 1;
+        let speaker_label = format!("Speaker {}", speaker_num);
+        
+        let duration = t_end - t_start;
+        
+        // Update speaker stats
+        let stats = speaker_stats.entry(speaker_id.clone()).or_insert(SpeakerStats {
+            id: speaker_id.clone(),
+            label: speaker_label.clone(),
+            segment_count: 0,
+            total_duration: 0.0,
+            first_audio_start: Some(t_start),
+        });
+        stats.segment_count += 1;
+        stats.total_duration += duration;
+        if stats.first_audio_start.is_none() {
+            stats.first_audio_start = Some(t_start);
+        }
+        
+        speaker_labels.push(SpeakerLabel {
+            segment_id: seg_id.clone(),
+            speaker_id: speaker_id.clone(),
+            speaker_label,
+        });
+    }
+    
+    // Convert stats to Speaker objects
     let speakers: Vec<Speaker> = speaker_stats
         .into_values()
         .map(|stats| Speaker {
@@ -130,224 +215,12 @@ fn assign_speakers_turn_based(
             sample_audio_start: stats.first_audio_start,
         })
         .collect();
-
+    
     (speaker_labels, speakers)
 }
 
-/// Groups consecutive segments into conversation turns based on timing gaps
-fn group_into_turns(
-    segments: &[(String, String, Option<f64>, Option<f64>)],
-) -> Vec<ConversationTurn> {
-    // Gap threshold for considering a speaker change (in seconds)
-    // A pause longer than this suggests a new turn
-    const TURN_GAP_THRESHOLD: f64 = 1.5;
-
-    let mut turns: Vec<ConversationTurn> = Vec::new();
-    let mut current_turn_segments: Vec<usize> = Vec::new();
-    let mut current_turn_start: Option<f64> = None;
-    let mut last_end_time: Option<f64> = None;
-
-    for (idx, (_id, _text, audio_start, audio_end)) in segments.iter().enumerate() {
-        let start = audio_start.unwrap_or(idx as f64 * 5.0); // Fallback timing
-        let end = audio_end.unwrap_or(start + 3.0);
-
-        // Check if this segment starts a new turn
-        let is_new_turn = if let Some(last_end) = last_end_time {
-            let gap = start - last_end;
-            gap > TURN_GAP_THRESHOLD
-        } else {
-            true // First segment starts a new turn
-        };
-
-        if is_new_turn && !current_turn_segments.is_empty() {
-            // Save the current turn
-            turns.push(ConversationTurn {
-                start_time: current_turn_start.unwrap_or(0.0),
-                end_time: last_end_time.unwrap_or(0.0),
-                segment_indices: current_turn_segments.clone(),
-            });
-            current_turn_segments.clear();
-            current_turn_start = None;
-        }
-
-        // Add segment to current turn
-        if current_turn_start.is_none() {
-            current_turn_start = Some(start);
-        }
-        current_turn_segments.push(idx);
-        last_end_time = Some(end);
-    }
-
-    // Don't forget the last turn
-    if !current_turn_segments.is_empty() {
-        turns.push(ConversationTurn {
-            start_time: current_turn_start.unwrap_or(0.0),
-            end_time: last_end_time.unwrap_or(0.0),
-            segment_indices: current_turn_segments,
-        });
-    }
-
-    turns
-}
-
-/// Assigns speakers to turns using conversation patterns
-fn assign_speakers_to_turns(
-    turns: &[ConversationTurn],
-    segments: &[(String, String, Option<f64>, Option<f64>)],
-) -> Vec<String> {
-    if turns.is_empty() {
-        return vec![];
-    }
-
-    // Analyze the conversation to estimate number of speakers
-    let num_speakers = estimate_speaker_count(turns, segments);
-    log::info!("Estimated {} speakers in conversation", num_speakers);
-
-    let mut turn_speakers = Vec::with_capacity(turns.len());
-    let mut current_speaker = 1;
-
-    for (turn_idx, turn) in turns.iter().enumerate() {
-        // For the first turn, always start with Speaker 1
-        if turn_idx == 0 {
-            turn_speakers.push(format!("speaker_{}", current_speaker));
-            continue;
-        }
-
-        // Check if this turn should be a different speaker
-        let prev_turn = &turns[turn_idx - 1];
-        let gap_between_turns = turn.start_time - prev_turn.end_time;
-
-        // Get text from the current turn for analysis
-        let current_text = get_turn_text(turn, segments);
-
-        // Determine if speaker changed based on multiple factors
-        let should_change_speaker =
-            analyze_speaker_change(gap_between_turns, &current_text, turn_idx, turns.len());
-
-        if should_change_speaker {
-            // Cycle to next speaker
-            current_speaker = if current_speaker >= num_speakers {
-                1
-            } else {
-                current_speaker + 1
-            };
-        }
-
-        turn_speakers.push(format!("speaker_{}", current_speaker));
-    }
-
-    turn_speakers
-}
-
-/// Estimates the number of speakers based on conversation patterns
-fn estimate_speaker_count(
-    turns: &[ConversationTurn],
-    _segments: &[(String, String, Option<f64>, Option<f64>)],
-) -> usize {
-    // Estimate based on turn patterns
-    // Most conversations have 2-4 speakers
-
-    // Count significant pauses (potential speaker changes)
-    let mut significant_pauses = 0;
-    for i in 1..turns.len() {
-        let gap = turns[i].start_time - turns[i - 1].end_time;
-        if gap > 1.0 {
-            significant_pauses += 1;
-        }
-    }
-
-    // Estimate speakers: for short meetings, likely 2; for longer ones, maybe 3-4
-    if turns.len() <= 5 {
-        2
-    } else if significant_pauses > turns.len() / 2 {
-        // Many pauses suggest more back-and-forth, likely 2 speakers
-        2
-    } else if turns.len() > 20 {
-        // Longer meeting might have more speakers
-        std::cmp::min(3, (turns.len() / 10) + 2)
-    } else {
-        2
-    }
-}
-
-/// Gets the combined text from a turn
-fn get_turn_text(
-    turn: &ConversationTurn,
-    segments: &[(String, String, Option<f64>, Option<f64>)],
-) -> String {
-    turn.segment_indices
-        .iter()
-        .map(|&idx| segments[idx].1.as_str())
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-/// Analyzes whether the speaker likely changed at this turn
-fn analyze_speaker_change(gap: f64, text: &str, turn_idx: usize, total_turns: usize) -> bool {
-    let text_lower = text.to_lowercase();
-    let text_trimmed = text_lower.trim();
-
-    // Strong indicators of speaker change
-    let is_response = text_trimmed.starts_with("yeah")
-        || text_trimmed.starts_with("yes")
-        || text_trimmed.starts_with("right")
-        || text_trimmed.starts_with("exactly")
-        || text_trimmed.starts_with("absolutely")
-        || text_trimmed.starts_with("no,")
-        || text_trimmed.starts_with("no ")
-        || text_trimmed.starts_with("well,")
-        || text_trimmed.starts_with("so,")
-        || text_trimmed.starts_with("okay")
-        || text_trimmed.starts_with("i think")
-        || text_trimmed.starts_with("i believe")
-        || text_trimmed.starts_with("i agree")
-        || text_trimmed.starts_with("i disagree");
-
-    let is_question = text_trimmed.ends_with('?')
-        || text_trimmed.starts_with("what")
-        || text_trimmed.starts_with("how")
-        || text_trimmed.starts_with("why")
-        || text_trimmed.starts_with("when")
-        || text_trimmed.starts_with("where")
-        || text_trimmed.starts_with("do you")
-        || text_trimmed.starts_with("are you")
-        || text_trimmed.starts_with("can you")
-        || text_trimmed.starts_with("would you");
-
-    // Timing-based decision
-    // Significant gap almost always means speaker change
-    if gap > 2.0 {
-        return true;
-    }
-
-    // Medium gap with linguistic indicator
-    if gap > 1.0 && (is_response || is_question) {
-        return true;
-    }
-
-    // For very short conversations, alternate more aggressively
-    if total_turns <= 10 && turn_idx % 2 == 1 && gap > 0.5 {
-        return true;
-    }
-
-    // For longer conversations, use more conservative approach
-    // Change speaker on noticeable pauses
-    if gap > 1.5 {
-        return true;
-    }
-
-    false
-}
-
-// Store diarization results in memory (in production, this would be in the database)
-use std::sync::LazyLock;
-use std::sync::Mutex;
-
-static DIARIZATION_CACHE: LazyLock<Mutex<HashMap<String, (Vec<SpeakerLabel>, Vec<Speaker>)>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
 /// Re-transcribe the meeting audio with speaker diarization enabled.
-/// This performs heuristic-based diarization on the existing transcripts.
+/// This calls the Python backend which uses pyannote.audio for voice-based speaker recognition.
 #[command]
 pub async fn retranscribe_with_diarization<R: Runtime>(
     _app: AppHandle<R>,
@@ -361,7 +234,11 @@ pub async fn retranscribe_with_diarization<R: Runtime>(
 
     let pool = state.db_manager.pool();
 
-    // Get transcripts for the meeting
+    // Get audio file path for the meeting
+    let audio_path = get_audio_path_for_meeting(pool, &meeting_id).await?;
+    log::info!("Found audio file: {}", audio_path);
+
+    // Get transcripts for the meeting (needed for mapping speakers to segments)
     let transcripts =
         MeetingsRepository::get_meeting_transcripts_paginated(pool, &meeting_id, 1000, 0)
             .await
@@ -376,7 +253,17 @@ pub async fn retranscribe_with_diarization<R: Runtime>(
         transcripts.0.len()
     );
 
-    // Convert to format needed for diarization
+    // Call Python backend for actual diarization using pyannote.audio
+    log::info!("Calling pyannote.audio diarization via Python backend...");
+    let diarization_result = call_diarization_api(&audio_path, &meeting_id).await?;
+    
+    log::info!(
+        "pyannote.audio detected {} speakers in {:.1}s of audio",
+        diarization_result.num_speakers,
+        diarization_result.duration
+    );
+
+    // Convert to format needed for speaker assignment
     let segments: Vec<(String, String, Option<f64>, Option<f64>)> = transcripts
         .0
         .iter()
@@ -390,11 +277,11 @@ pub async fn retranscribe_with_diarization<R: Runtime>(
         })
         .collect();
 
-    // Run speaker diarization using turn-based algorithm
-    let (speaker_labels, speakers) = assign_speakers_turn_based(&segments);
+    // Assign speakers to transcript segments based on diarization results
+    let (speaker_labels, speakers) = assign_speakers_from_diarization(&diarization_result, &segments);
 
     log::info!(
-        "Diarization complete: {} speakers detected, {} segments labeled",
+        "Speaker assignment complete: {} speakers, {} segments labeled",
         speakers.len(),
         speaker_labels.len()
     );

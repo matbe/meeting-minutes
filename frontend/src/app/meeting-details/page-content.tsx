@@ -324,17 +324,21 @@ export default function PageContent({
     if (playingSpeakerId === speaker.id) {
       // Stop playback
       setPlayingSpeakerId(null);
+      audioPlayerRef.current?.pause();
       return;
     }
     
     // Get sample audio start time and seek to it
     const sampleStart = speaker.sampleAudioStart ?? 0;
     audioPlayerRef.current?.seekTo(sampleStart);
+    // Start playback
+    audioPlayerRef.current?.play();
     setPlayingSpeakerId(speaker.id);
     
     // Auto-stop after 5 seconds
     speakerSampleTimeoutRef.current = setTimeout(() => {
       setPlayingSpeakerId(null);
+      audioPlayerRef.current?.pause();
       speakerSampleTimeoutRef.current = null;
     }, 5000);
   }, [playingSpeakerId]);
