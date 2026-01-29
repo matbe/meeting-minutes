@@ -229,6 +229,9 @@ export default function PageContent({
     console.log('🎤 Full enhance (re-transcribe with diarization) requested');
     setIsEnhancing(true);
     
+    // Show initial toast to indicate processing has started
+    toast.info('Analyzing speakers... This may take a few minutes for long recordings.');
+    
     try {
       // Call diarization API - this returns speaker labels for all segments
       const speakerLabelsResult = await invoke<SpeakerLabel[]>('retranscribe_with_diarization', { meetingId: meeting.id });
@@ -263,6 +266,8 @@ export default function PageContent({
         toast.error('Please load the diarization model in Settings → Speakers first.');
       } else if (errorMessage.includes('pyannote') || errorMessage.includes('dependencies')) {
         toast.error('Speaker diarization requires pyannote.audio. Please install dependencies.');
+      } else if (errorMessage.includes('AudioMetaData') || errorMessage.includes('torchaudio')) {
+        toast.error('Dependency version mismatch. Please reinstall: pip install torch<2.6 torchaudio<2.6');
       } else {
         toast.error(`Speaker detection failed: ${errorMessage}`);
       }
@@ -451,6 +456,7 @@ export default function PageContent({
           onFullEnhance={handleFullEnhance}
           onQuickLabel={handleQuickLabel}
           onTagClick={handleTagClick}
+          isEnhancing={isEnhancing}
           // Retranscription props
           meetingId={meeting.id}
           meetingFolderPath={meeting.folder_path}

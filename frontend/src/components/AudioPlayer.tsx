@@ -15,6 +15,8 @@ interface AudioPlayerProps {
   onQuickLabel?: () => void;
   /** Callback when "Tag" button is clicked */
   onTagClick?: () => void;
+  /** Whether enhancement is in progress */
+  isEnhancing?: boolean;
 }
 
 export interface AudioPlayerRef {
@@ -49,7 +51,7 @@ function base64ToBlob(base64: string, mimeType: string): Blob {
 }
 
 export const AudioPlayer = forwardRef<AudioPlayerRef, AudioPlayerProps>(
-  ({ audioFilePath, onTimeUpdate, className = '', onFullEnhance, onQuickLabel, onTagClick }, ref) => {
+  ({ audioFilePath, onTimeUpdate, className = '', onFullEnhance, onQuickLabel, onTagClick, isEnhancing = false }, ref) => {
     const [isPlaying, setIsPlaying] = useState(false);
     const [currentTime, setCurrentTime] = useState(0);
     const [duration, setDuration] = useState(0);
@@ -333,6 +335,7 @@ export const AudioPlayer = forwardRef<AudioPlayerRef, AudioPlayerProps>(
             onFullEnhance={onFullEnhance || (() => {})}
             onQuickLabel={onQuickLabel || (() => {})}
             disabled={isDisabled}
+            isEnhancing={isEnhancing}
           />
         </div>
 
