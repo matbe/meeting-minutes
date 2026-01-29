@@ -1379,3 +1379,52 @@ pub async fn api_test_custom_openai_connection<R: Runtime>(
         }
     }
 }
+
+/// Get the audio file path for a meeting folder
+/// Searches for common audio file formats (.mp4, .wav, .m4a, .webm, .ogg) in the meeting folder
+/// Returns the first match, prioritizing audio.mp4 which is the default recording format
+#[tauri::command]
+pub async fn get_meeting_audio_path(meeting_folder: String) -> Result<Option<String>, String> {
+    log_debug!("Looking for audio file in folder: {}", meeting_folder);
+
+    let folder_path = std::path::Path::new(&meeting_folder);
+
+    if !folder_path.exists() {
+        log_warn!("Meeting folder does not exist: {}", meeting_folder);
+        return Ok(None);
+    }
+
+    // Verify it's a directory
+    if !folder_path.is_dir() {
+        log_warn!("Path is not a directory: {}", meeting_folder);
+        return Err("Path is not a directory".to_string());
+    }
+
+    // Look for audio.mp4 first (the default name used by the recording system)
+    let audio_mp4 = folder_path.join("audio.mp4");
+    if audio_mp4.exists() {
+        log_debug!("Found audio.mp4 at: {:?}", audio_mp4);
+        return Ok(Some(audio_mp4.to_string_lossy().to_string()));
+    }
+
+    // Supported audio file extensions
+    const AUDIO_EXTENSIONS: &[&str] = &["mp4", "wav", "m4a", "webm", "ogg", "flac", "aac"];
+
+    // Then look for any supported audio file
+    let entries = std::fs::read_dir(folder_path)
+        .map_err(|e| format!("Failed to read meeting folder: {}", e))?;
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if let Some(ext) = path.extension() {
+            let ext_lower = ext.to_string_lossy().to_lowercase();
+            if AUDIO_EXTENSIONS.contains(&ext_lower.as_str()) {
+                log_debug!("Found audio file: {:?}", path);
+                return Ok(Some(path.to_string_lossy().to_string()));
+            }
+        }
+    }
+
+    log_debug!("No audio file found in folder: {}", meeting_folder);
+    Ok(None)
+}

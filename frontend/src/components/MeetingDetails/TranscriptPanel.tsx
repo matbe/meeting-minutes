@@ -4,7 +4,8 @@ import { Transcript, TranscriptSegmentData } from '@/types';
 import { TranscriptView } from '@/components/TranscriptView';
 import { VirtualizedTranscriptView } from '@/components/VirtualizedTranscriptView';
 import { TranscriptButtonGroup } from './TranscriptButtonGroup';
-import { useMemo } from 'react';
+import { AudioPlayer, AudioPlayerRef } from '@/components/AudioPlayer';
+import { useMemo, Ref } from 'react';
 
 interface TranscriptPanelProps {
   transcripts: Transcript[];
@@ -23,6 +24,15 @@ interface TranscriptPanelProps {
   totalCount?: number;
   loadedCount?: number;
   onLoadMore?: () => void;
+
+  // Audio playback props
+  onSegmentClick?: (audioStartTime: number) => void;
+  currentPlaybackTime?: number;
+  
+  // Audio player props
+  audioFilePath?: string | null;
+  audioPlayerRef?: Ref<AudioPlayerRef>;
+  onAudioTimeUpdate?: (time: number) => void;
 }
 
 export function TranscriptPanel({
@@ -40,6 +50,11 @@ export function TranscriptPanel({
   totalCount,
   loadedCount,
   onLoadMore,
+  onSegmentClick,
+  currentPlaybackTime,
+  audioFilePath,
+  audioPlayerRef,
+  onAudioTimeUpdate,
 }: TranscriptPanelProps) {
   // Convert transcripts to segments if pagination is not used but we want virtualization
   const convertedSegments = useMemo(() => {
@@ -83,6 +98,8 @@ export function TranscriptPanel({
           totalCount={totalCount}
           loadedCount={loadedCount}
           onLoadMore={onLoadMore}
+          onSegmentClick={onSegmentClick}
+          currentPlaybackTime={currentPlaybackTime}
         />
       </div>
 
@@ -94,6 +111,17 @@ export function TranscriptPanel({
             className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white shadow-sm min-h-[80px] resize-y"
             value={customPrompt}
             onChange={(e) => onPromptChange(e.target.value)}
+          />
+        </div>
+      )}
+      
+      {/* Audio Player - shown when audio file exists */}
+      {audioFilePath && (
+        <div className="border-t border-gray-200 p-3 bg-gray-50">
+          <AudioPlayer
+            ref={audioPlayerRef}
+            audioFilePath={audioFilePath}
+            onTimeUpdate={onAudioTimeUpdate}
           />
         </div>
       )}

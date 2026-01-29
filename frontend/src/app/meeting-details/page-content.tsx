@@ -1,11 +1,13 @@
 "use client";
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion } from 'framer-motion';
+import { invoke } from '@tauri-apps/api/core';
 import { Summary, SummaryResponse } from '@/types';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import Analytics from '@/lib/analytics';
 import { TranscriptPanel } from '@/components/MeetingDetails/TranscriptPanel';
 import { SummaryPanel } from '@/components/MeetingDetails/SummaryPanel';
+import { AudioPlayer, AudioPlayerRef } from '@/components/AudioPlayer';
 
 // Custom hooks
 import { useMeetingData } from '@/hooks/meeting-details/useMeetingData';
@@ -52,6 +54,11 @@ export default function PageContent({
   const [customPrompt, setCustomPrompt] = useState<string>('');
   const [isRecording] = useState(false);
   const [summaryResponse] = useState<SummaryResponse | null>(null);
+
+  // Audio player state
+  const [audioFilePath, setAudioFilePath] = useState<string | null>(null);
+  const [currentPlaybackTime, setCurrentPlaybackTime] = useState<number>(0);
+  const audioPlayerRef = useRef<AudioPlayerRef>(null);
 
   // Ref to store the modal open function from SummaryGeneratorButtonGroup
   const openModelSettingsRef = useRef<(() => void) | null>(null);
@@ -118,6 +125,37 @@ export default function PageContent({
     Analytics.trackPageView('meeting_details');
   }, []);
 
+  // Load audio file path for the meeting
+  useEffect(() => {
+    const loadAudioPath = async () => {
+      if (meeting.folder_path) {
+        try {
+          const path = await invoke<string | null>('get_meeting_audio_path', {
+            meetingFolder: meeting.folder_path
+          });
+          setAudioFilePath(path);
+          console.log('🎵 Audio file path:', path);
+        } catch (err) {
+          console.error('Failed to get audio file path:', err);
+          setAudioFilePath(null);
+        }
+      }
+    };
+
+    loadAudioPath();
+  }, [meeting.folder_path]);
+
+  // Handle transcript segment click - seek audio to that time
+  const handleSegmentClick = useCallback((audioStartTime: number) => {
+    console.log('🎵 Seeking to:', audioStartTime);
+    audioPlayerRef.current?.seekTo(audioStartTime);
+  }, []);
+
+  // Handle audio time update
+  const handleAudioTimeUpdate = useCallback((time: number) => {
+    setCurrentPlaybackTime(time);
+  }, []);
+
   // Auto-generate summary when flag is set
   useEffect(() => {
     let cancelled = false;
@@ -166,6 +204,13 @@ export default function PageContent({
           totalCount={totalCount}
           loadedCount={loadedCount}
           onLoadMore={onLoadMore}
+          // Audio playback props
+          onSegmentClick={audioFilePath ? handleSegmentClick : undefined}
+          currentPlaybackTime={currentPlaybackTime}
+          // Audio player
+          audioFilePath={audioFilePath}
+          audioPlayerRef={audioPlayerRef}
+          onAudioTimeUpdate={handleAudioTimeUpdate}
         />
         <SummaryPanel
           meeting={meeting}
