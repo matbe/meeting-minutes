@@ -34,6 +34,12 @@ export interface VirtualizedTranscriptViewProps {
     totalCount?: number;
     loadedCount?: number;
     onLoadMore?: () => void;
+
+    // Audio playback props
+    /** Callback when a segment timestamp is clicked */
+    onSegmentClick?: (audioStartTime: number) => void;
+    /** Current audio playback time for highlighting active segment */
+    currentPlaybackTime?: number;
 }
 
 // Threshold for enabling virtualization (below this, use simple rendering)
@@ -67,33 +73,54 @@ function cleanStopWords(text: string): string {
 const TranscriptSegment = memo(function TranscriptSegment({
     id,
     timestamp,
+    endTime,
     text,
     confidence,
     isStreaming,
     showConfidence,
+    onClick,
+    isActive,
 }: {
     id: string;
     timestamp: number;
+    endTime?: number;
     text: string;
     confidence?: number;
     isStreaming: boolean;
     showConfidence: boolean;
+    onClick?: () => void;
+    isActive?: boolean;
 }) {
     const displayText = cleanStopWords(text) || (text.trim() === '' ? '[Silence]' : text);
 
     return (
-        <div id={`segment-${id}`} className="mb-3">
+        <div 
+            id={`segment-${id}`} 
+            className={`mb-3 ${isActive ? 'bg-blue-50 -mx-2 px-2 py-1 rounded-lg border-l-2 border-blue-500' : ''}`}
+        >
             <div className="flex items-start gap-2">
                 <Tooltip>
-                    <TooltipTrigger>
-                        <span className="text-xs text-gray-400 mt-1 flex-shrink-0 min-w-[50px]">
+                    <TooltipTrigger asChild>
+                        <button
+                            onClick={onClick}
+                            className={`text-xs mt-1 flex-shrink-0 min-w-[50px] text-left transition-colors
+                                ${onClick ? 'cursor-pointer hover:text-blue-600 hover:bg-blue-50 rounded px-1 -ml-1' : ''}
+                                ${isActive ? 'text-blue-600 font-medium' : 'text-gray-400'}`}
+                            disabled={!onClick}
+                            type="button"
+                        >
                             {formatRecordingTime(timestamp)}
-                        </span>
+                        </button>
                     </TooltipTrigger>
                     <TooltipContent>
-                        {confidence !== undefined && showConfidence && (
-                            <ConfidenceIndicator confidence={confidence} showIndicator={showConfidence} />
-                        )}
+                        <div className="flex flex-col gap-1">
+                            {onClick && <span className="text-xs">Click to jump to this time</span>}
+                            {confidence !== undefined && showConfidence && (
+                                <div className={onClick ? 'border-t border-gray-200 pt-1' : ''}>
+                                    <ConfidenceIndicator confidence={confidence} showIndicator={showConfidence} />
+                                </div>
+                            )}
+                        </div>
                     </TooltipContent>
                 </Tooltip>
                 <div className="flex-1">
@@ -102,7 +129,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
                             <p className="text-base text-gray-800 leading-relaxed">{displayText}</p>
                         </div>
                     ) : (
-                        <p className="text-base text-gray-800 leading-relaxed">{displayText}</p>
+                        <p className={`text-base leading-relaxed ${isActive ? 'text-gray-900' : 'text-gray-800'}`}>{displayText}</p>
                     )}
                 </div>
             </div>
@@ -124,6 +151,8 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     totalCount = 0,
     loadedCount = 0,
     onLoadMore,
+    onSegmentClick,
+    currentPlaybackTime,
 }) => {
     // Create scroll ref first - shared between virtualizer and auto-scroll hook
     const scrollRef = useRef<HTMLDivElement>(null);
@@ -223,6 +252,24 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     // Use simple rendering for small lists, virtualization for large lists
     const useVirtualization = segments.length >= VIRTUALIZATION_THRESHOLD;
 
+    // Helper function to check if a segment is currently active based on playback time
+    // Use the segment's endTime if available, otherwise use the next segment's startTime or a reasonable duration
+    const isSegmentActive = useCallback((segment: TranscriptSegmentData, index?: number): boolean => {
+        if (currentPlaybackTime === undefined) return false;
+        const startTime = segment.timestamp;
+        // Prefer segment.endTime, then try next segment's start, fallback to start + duration estimate
+        let endTime = segment.endTime;
+        if (endTime === undefined && index !== undefined && index < segments.length - 1) {
+            // Use next segment's start time as this segment's end
+            endTime = segments[index + 1].timestamp;
+        }
+        if (endTime === undefined) {
+            // Fallback: estimate based on typical segment duration (5 seconds)
+            endTime = startTime + 5;
+        }
+        return currentPlaybackTime >= startTime && currentPlaybackTime < endTime;
+    }, [currentPlaybackTime, segments]);
+
     return (
         <div ref={scrollRef} className="flex flex-col h-full overflow-y-auto px-4 py-2">
             {/* Recording Status Bar - Sticky at top, always visible when recording */}
@@ -292,10 +339,13 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                     <TranscriptSegment
                                         id={segment.id}
                                         timestamp={segment.timestamp}
+                                        endTime={segment.endTime}
                                         text={getDisplayText(segment)}
                                         confidence={segment.confidence}
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
+                                        onClick={onSegmentClick ? () => onSegmentClick(segment.timestamp) : undefined}
+                                        isActive={isSegmentActive(segment, virtualRow.index)}
                                     />
                                 </div>
                             );
@@ -335,7 +385,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                 // Simple rendering for small lists (better animations)
                 <>
                     <div className="space-y-1">
-                        {segments.map((segment) => {
+                        {segments.map((segment, index) => {
                             const isStreaming = streamingSegmentId === segment.id;
 
                             return (
@@ -348,10 +398,13 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                     <TranscriptSegment
                                         id={segment.id}
                                         timestamp={segment.timestamp}
+                                        endTime={segment.endTime}
                                         text={getDisplayText(segment)}
                                         confidence={segment.confidence}
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
+                                        onClick={onSegmentClick ? () => onSegmentClick(segment.timestamp) : undefined}
+                                        isActive={isSegmentActive(segment, index)}
                                     />
                                 </motion.div>
                             );

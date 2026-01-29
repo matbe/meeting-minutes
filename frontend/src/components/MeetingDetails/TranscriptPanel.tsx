@@ -4,7 +4,8 @@ import { Transcript, TranscriptSegmentData } from '@/types';
 import { TranscriptView } from '@/components/TranscriptView';
 import { VirtualizedTranscriptView } from '@/components/VirtualizedTranscriptView';
 import { TranscriptButtonGroup } from './TranscriptButtonGroup';
-import { useMemo } from 'react';
+import { AudioPlayer, AudioPlayerRef } from '@/components/AudioPlayer';
+import { useMemo, Ref } from 'react';
 
 interface TranscriptPanelProps {
   transcripts: Transcript[];
@@ -23,6 +24,15 @@ interface TranscriptPanelProps {
   totalCount?: number;
   loadedCount?: number;
   onLoadMore?: () => void;
+
+  // Audio playback props
+  onSegmentClick?: (audioStartTime: number) => void;
+  currentPlaybackTime?: number;
+  
+  // Audio player props
+  audioFilePath?: string | null;
+  audioPlayerRef?: Ref<AudioPlayerRef>;
+  onAudioTimeUpdate?: (time: number) => void;
 }
 
 export function TranscriptPanel({
@@ -40,6 +50,11 @@ export function TranscriptPanel({
   totalCount,
   loadedCount,
   onLoadMore,
+  onSegmentClick,
+  currentPlaybackTime,
+  audioFilePath,
+  audioPlayerRef,
+  onAudioTimeUpdate,
 }: TranscriptPanelProps) {
   // Convert transcripts to segments if pagination is not used but we want virtualization
   const convertedSegments = useMemo(() => {
@@ -83,6 +98,8 @@ export function TranscriptPanel({
           totalCount={totalCount}
           loadedCount={loadedCount}
           onLoadMore={onLoadMore}
+          onSegmentClick={onSegmentClick}
+          currentPlaybackTime={currentPlaybackTime}
         />
       </div>
 
@@ -96,6 +113,15 @@ export function TranscriptPanel({
             onChange={(e) => onPromptChange(e.target.value)}
           />
         </div>
+      )}
+      
+      {/* Audio Player - always shown when there are transcripts */}
+      {!isRecording && convertedSegments.length > 0 && (
+        <AudioPlayer
+          ref={audioPlayerRef}
+          audioFilePath={audioFilePath ?? null}
+          onTimeUpdate={onAudioTimeUpdate}
+        />
       )}
     </div>
   );
