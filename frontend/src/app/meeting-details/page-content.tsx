@@ -388,6 +388,9 @@ export default function PageContent({
           onFullEnhance={handleFullEnhance}
           onQuickLabel={handleQuickLabel}
           onTagClick={handleTagClick}
+          // Retranscription props
+          meetingId={meeting.id}
+          meetingFolderPath={meeting.folder_path}
         />
         <SummaryPanel
           meeting={meeting}
