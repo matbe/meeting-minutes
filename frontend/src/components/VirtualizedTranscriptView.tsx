@@ -9,6 +9,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { RecordingStatusBar } from "./RecordingStatusBar";
 import { motion, AnimatePresence } from "framer-motion";
 import { TranscriptSegmentData } from "@/types";
+import { SPEAKER_COLORS, getSpeakerColorIndex } from "@/lib/speakerColors";
 
 export interface VirtualizedTranscriptViewProps {
     /** Transcript segments to display */
@@ -63,32 +64,6 @@ function cleanStopWords(text: string): string {
     return cleanedText.replace(/\s+/g, ' ').trim();
 }
 
-// Speaker colors for visual distinction (matching SpeakerTagModal)
-const SPEAKER_COLORS = [
-    { bg: "bg-blue-100", text: "text-blue-700", border: "border-blue-200" },
-    { bg: "bg-green-100", text: "text-green-700", border: "border-green-200" },
-    { bg: "bg-purple-100", text: "text-purple-700", border: "border-purple-200" },
-    { bg: "bg-orange-100", text: "text-orange-700", border: "border-orange-200" },
-    { bg: "bg-pink-100", text: "text-pink-700", border: "border-pink-200" },
-    { bg: "bg-cyan-100", text: "text-cyan-700", border: "border-cyan-200" },
-    { bg: "bg-yellow-100", text: "text-yellow-700", border: "border-yellow-200" },
-    { bg: "bg-red-100", text: "text-red-700", border: "border-red-200" },
-];
-
-function getSpeakerColorIndex(speakerId: string): number {
-    // Extract numeric part from speaker ID (e.g., "speaker_1" -> 1)
-    const match = speakerId.match(/\d+/);
-    if (match) {
-        return (parseInt(match[0], 10) - 1) % SPEAKER_COLORS.length;
-    }
-    // Fallback: hash the speaker ID to get a consistent color
-    let hash = 0;
-    for (let i = 0; i < speakerId.length; i++) {
-        hash = speakerId.charCodeAt(i) + ((hash << 5) - hash);
-    }
-    return Math.abs(hash) % SPEAKER_COLORS.length;
-}
-
 // Memoized transcript segment component
 const TranscriptSegment = memo(function TranscriptSegment({
     id,
@@ -122,6 +97,8 @@ const TranscriptSegment = memo(function TranscriptSegment({
                 {/* Speaker label (if available) */}
                 {speakerLabel && speakerColor && (
                     <span 
+                        role="status"
+                        aria-label={`Speaker: ${speakerLabel}`}
                         className={`text-xs px-1.5 py-0.5 rounded mt-0.5 shrink-0 ${speakerColor.bg} ${speakerColor.text}`}
                         title={`Speaker: ${speakerLabel}`}
                     >

@@ -83,15 +83,18 @@ export function TranscriptPanel({
     for (const segment of segs) {
       if (segment.speaker_id) {
         const existing = speakerMap.get(segment.speaker_id);
-        const duration = (segment.endTime ?? segment.timestamp) - segment.timestamp;
+        // Calculate duration, using endTime if available, otherwise estimate 3s per segment
+        const segmentDuration = segment.endTime !== undefined 
+          ? Math.max(0, segment.endTime - segment.timestamp)
+          : 3; // Default estimate of 3 seconds per segment
         
         if (existing) {
           existing.segments += 1;
-          existing.totalDuration += duration;
+          existing.totalDuration += segmentDuration;
         } else {
           speakerMap.set(segment.speaker_id, {
             segments: 1,
-            totalDuration: duration,
+            totalDuration: segmentDuration,
             firstTimestamp: segment.timestamp,
           });
         }

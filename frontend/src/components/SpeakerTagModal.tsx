@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Play, Check, X, Pause } from "lucide-react";
 import { Speaker } from "@/types";
+import { getSpeakerColorClasses } from "@/lib/speakerColors";
 
 interface SpeakerTagModalProps {
   isOpen: boolean;
@@ -22,20 +23,8 @@ interface SpeakerTagModalProps {
   isPlaying?: string | null; // ID of currently playing speaker, or null
 }
 
-// Speaker colors for visual distinction
-const SPEAKER_COLORS = [
-  "bg-blue-100 text-blue-800 border-blue-200",
-  "bg-green-100 text-green-800 border-green-200",
-  "bg-purple-100 text-purple-800 border-purple-200",
-  "bg-orange-100 text-orange-800 border-orange-200",
-  "bg-pink-100 text-pink-800 border-pink-200",
-  "bg-cyan-100 text-cyan-800 border-cyan-200",
-  "bg-yellow-100 text-yellow-800 border-yellow-200",
-  "bg-red-100 text-red-800 border-red-200",
-];
-
 function formatDuration(seconds: number): string {
-  if (isNaN(seconds) || !isFinite(seconds)) return "NaNs";
+  if (isNaN(seconds) || !isFinite(seconds)) return "0s";
   const mins = Math.floor(seconds / 60);
   const secs = Math.floor(seconds % 60);
   if (mins > 0) {
@@ -67,9 +56,11 @@ export function SpeakerTagModal({
     setEditValue("");
   }, []);
 
-  const handleSaveEdit = useCallback((speakerId: string) => {
-    if (editValue.trim()) {
-      onSaveSpeakerLabel(speakerId, editValue.trim());
+  const handleSaveEdit = useCallback((speakerId: string, originalLabel: string) => {
+    const trimmedValue = editValue.trim();
+    // Only save if there's a non-empty value that's different from original
+    if (trimmedValue && trimmedValue !== originalLabel) {
+      onSaveSpeakerLabel(speakerId, trimmedValue);
     }
     setEditingSpeakerId(null);
     setEditValue("");
@@ -100,7 +91,7 @@ export function SpeakerTagModal({
             </p>
           ) : (
             speakers.map((speaker, index) => {
-              const colorClass = SPEAKER_COLORS[index % SPEAKER_COLORS.length];
+              const colorClass = getSpeakerColorClasses(index);
               const isEditing = editingSpeakerId === speaker.id;
               const isCurrentlyPlaying = isPlaying === speaker.id;
 
@@ -134,9 +125,10 @@ export function SpeakerTagModal({
                           onChange={(e) => setEditValue(e.target.value)}
                           className="h-8 text-sm"
                           autoFocus
+                          aria-label={`Edit name for ${speaker.label}`}
                           onKeyDown={(e) => {
                             if (e.key === "Enter") {
-                              handleSaveEdit(speaker.id);
+                              handleSaveEdit(speaker.id, speaker.label);
                             } else if (e.key === "Escape") {
                               handleCancelEdit();
                             }
@@ -146,7 +138,9 @@ export function SpeakerTagModal({
                           variant="ghost"
                           size="icon"
                           className="h-8 w-8 shrink-0"
-                          onClick={() => handleSaveEdit(speaker.id)}
+                          onClick={() => handleSaveEdit(speaker.id, speaker.label)}
+                          disabled={!editValue.trim()}
+                          aria-label="Save speaker name"
                         >
                           <Check className="h-4 w-4 text-green-600" />
                         </Button>
@@ -155,6 +149,7 @@ export function SpeakerTagModal({
                           size="icon"
                           className="h-8 w-8 shrink-0"
                           onClick={handleCancelEdit}
+                          aria-label="Cancel editing"
                         >
                           <X className="h-4 w-4 text-red-600" />
                         </Button>
@@ -162,6 +157,7 @@ export function SpeakerTagModal({
                     ) : (
                       <button
                         className="text-left w-full truncate font-medium hover:underline cursor-pointer"
+                        aria-label={`Edit speaker name: ${speaker.label}`}
                         onClick={() => handleStartEdit(speaker)}
                         title="Click to edit speaker name"
                       >
@@ -185,6 +181,3 @@ export function SpeakerTagModal({
     </Dialog>
   );
 }
-
-// Export speaker colors for use in transcript view
-export { SPEAKER_COLORS };
