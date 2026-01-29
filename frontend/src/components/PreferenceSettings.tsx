@@ -133,6 +133,94 @@ export function PreferenceSettings() {
     }
   };
 
+  const handleChangeFolder = async (folderType: 'database' | 'models' | 'recordings') => {
+    try {
+      let selectedPath: string | null = null;
+
+      switch (folderType) {
+        case 'database':
+          selectedPath = await invoke<string | null>('select_database_folder');
+          break;
+        case 'models':
+          selectedPath = await invoke<string | null>('select_models_folder');
+          break;
+        case 'recordings':
+          selectedPath = await invoke<string | null>('select_recording_folder');
+          break;
+      }
+
+      if (selectedPath) {
+        console.log(`Selected new ${folderType} path:`, selectedPath);
+
+        // For recordings, update the preferences
+        if (folderType === 'recordings') {
+          try {
+            const currentPrefs = await invoke('get_recording_preferences') as any;
+            const updatedPrefs = {
+              ...currentPrefs,
+              save_folder: selectedPath
+            };
+            await invoke('set_recording_preferences', { preferences: updatedPrefs });
+            
+            // Reload preferences to update UI
+            await loadPreferences();
+
+            // Track path change
+            await Analytics.track('storage_path_changed', {
+              folder_type: folderType
+            });
+
+            alert(`Recording path updated successfully to:\n${selectedPath}\n\nNew recordings will be saved to this location.`);
+          } catch (error) {
+            console.error('Failed to update recording preferences:', error);
+            alert('Failed to update recording path. Please try again.');
+          }
+        } else if (folderType === 'database') {
+          // For database, use the new command
+          try {
+            await invoke('set_database_path', { path: selectedPath });
+            
+            // Reload preferences to update UI
+            await loadPreferences();
+
+            // Track path change
+            await Analytics.track('storage_path_changed', {
+              folder_type: folderType
+            });
+
+            alert(`Database path updated successfully to:\n${selectedPath}\n\nPlease restart the application for this change to take effect.\n\nNote: Existing database files will not be automatically moved. You may need to manually copy them to the new location.`);
+          } catch (error) {
+            console.error('Failed to update database path:', error);
+            alert('Failed to update database path. Please try again.');
+          }
+        } else if (folderType === 'models') {
+          // For models, use the new command
+          try {
+            await invoke('set_models_path', { path: selectedPath });
+            
+            // Reload preferences to update UI
+            await loadPreferences();
+
+            // Track path change
+            await Analytics.track('storage_path_changed', {
+              folder_type: folderType
+            });
+
+            alert(`Models path updated successfully to:\n${selectedPath}\n\nPlease restart the application for this change to take effect.\n\nNote: Existing model files will not be automatically moved. You may need to manually copy them to the new location.`);
+          } catch (error) {
+            console.error('Failed to update models path:', error);
+            alert('Failed to update models path. Please try again.');
+          }
+        }
+      } else {
+        console.log('User cancelled folder selection');
+      }
+    } catch (error) {
+      console.error(`Failed to change ${folderType} folder:`, error);
+      alert(`Failed to change ${folderType} path. Please try again.`);
+    }
+  };
+
   // Show loading only if we're actually loading and don't have cached data
   if (isLoadingPreferences && !notificationSettings && !storageLocations) {
     return <div className="max-w-2xl mx-auto p-6">Loading Preferences...</div>
@@ -163,39 +251,55 @@ export function PreferenceSettings() {
       <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
         <h3 className="text-lg font-semibold text-gray-900 mb-4">Data Storage Locations</h3>
         <p className="text-sm text-gray-600 mb-6">
-          View and access where Meetily stores your data
+          View and change where Meetily stores your data
         </p>
 
         <div className="space-y-4">
           {/* Database Location */}
-          {/* <div className="p-4 border rounded-lg bg-gray-50">
+          <div className="p-4 border rounded-lg bg-gray-50">
             <div className="font-medium mb-2">Database</div>
             <div className="text-sm text-gray-600 mb-3 break-all font-mono text-xs">
               {storageLocations?.database || 'Loading...'}
             </div>
-            <button
-              onClick={() => handleOpenFolder('database')}
-              className="flex items-center gap-2 px-3 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-100 transition-colors"
-            >
-              <FolderOpen className="w-4 h-4" />
-              Open Folder
-            </button>
-          </div> */}
+            <div className="flex gap-2">
+              <button
+                onClick={() => handleOpenFolder('database')}
+                className="flex items-center gap-2 px-3 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-100 transition-colors"
+              >
+                <FolderOpen className="w-4 h-4" />
+                Open Folder
+              </button>
+              <button
+                onClick={() => handleChangeFolder('database')}
+                className="px-3 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+              >
+                Change Path
+              </button>
+            </div>
+          </div>
 
           {/* Models Location */}
-          {/* <div className="p-4 border rounded-lg bg-gray-50">
+          <div className="p-4 border rounded-lg bg-gray-50">
             <div className="font-medium mb-2">Whisper Models</div>
             <div className="text-sm text-gray-600 mb-3 break-all font-mono text-xs">
               {storageLocations?.models || 'Loading...'}
             </div>
-            <button
-              onClick={() => handleOpenFolder('models')}
-              className="flex items-center gap-2 px-3 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-100 transition-colors"
-            >
-              <FolderOpen className="w-4 h-4" />
-              Open Folder
-            </button>
-          </div> */}
+            <div className="flex gap-2">
+              <button
+                onClick={() => handleOpenFolder('models')}
+                className="flex items-center gap-2 px-3 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-100 transition-colors"
+              >
+                <FolderOpen className="w-4 h-4" />
+                Open Folder
+              </button>
+              <button
+                onClick={() => handleChangeFolder('models')}
+                className="px-3 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+              >
+                Change Path
+              </button>
+            </div>
+          </div>
 
           {/* Recordings Location */}
           <div className="p-4 border rounded-lg bg-gray-50">
@@ -203,19 +307,27 @@ export function PreferenceSettings() {
             <div className="text-sm text-gray-600 mb-3 break-all font-mono text-xs">
               {storageLocations?.recordings || 'Loading...'}
             </div>
-            <button
-              onClick={() => handleOpenFolder('recordings')}
-              className="flex items-center gap-2 px-3 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-100 transition-colors"
-            >
-              <FolderOpen className="w-4 h-4" />
-              Open Folder
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={() => handleOpenFolder('recordings')}
+                className="flex items-center gap-2 px-3 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-100 transition-colors"
+              >
+                <FolderOpen className="w-4 h-4" />
+                Open Folder
+              </button>
+              <button
+                onClick={() => handleChangeFolder('recordings')}
+                className="px-3 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+              >
+                Change Path
+              </button>
+            </div>
           </div>
         </div>
 
-        <div className="mt-4 p-3 bg-blue-50 rounded-md">
-          <p className="text-xs text-blue-800">
-            <strong>Note:</strong> Database and models are stored together in your application data directory for unified management.
+        <div className="mt-4 p-3 bg-amber-50 rounded-md border border-amber-200">
+          <p className="text-xs text-amber-800">
+            <strong>Note:</strong> Changing storage paths will require restarting the application. Existing data will not be automatically moved to the new location.
           </p>
         </div>
       </div>

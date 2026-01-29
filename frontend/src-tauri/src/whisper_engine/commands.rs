@@ -347,18 +347,27 @@ pub async fn whisper_transcribe_audio(audio_data: Vec<f32>) -> Result<String, St
     }
 }
 
+/// Get the models directory path (respecting custom path if set)
 #[command]
-pub async fn whisper_get_models_directory() -> Result<String, String> {
-    let engine = {
-        let guard = WHISPER_ENGINE.lock().unwrap();
-        guard.as_ref().cloned()
-    };
+pub async fn whisper_get_models_directory(app: AppHandle) -> Result<String, String> {
+    // Try to get custom path from storage preferences
+    match crate::storage_preferences::get_models_directory_path(&app).await {
+        Ok(path) => Ok(path.to_string_lossy().to_string()),
+        Err(e) => {
+            log::warn!("Failed to get custom models path, falling back to engine's path: {}", e);
+            // Fallback to the engine's configured path
+            let engine = {
+                let guard = WHISPER_ENGINE.lock().unwrap();
+                guard.as_ref().cloned()
+            };
 
-    if let Some(engine) = engine {
-        let path = engine.get_models_directory().await;
-        Ok(path.to_string_lossy().to_string())
-    } else {
-        Err("Whisper engine not initialized".to_string())
+            if let Some(engine) = engine {
+                let path = engine.get_models_directory().await;
+                Ok(path.to_string_lossy().to_string())
+            } else {
+                Err("Whisper engine not initialized".to_string())
+            }
+        }
     }
 }
 
@@ -464,9 +473,16 @@ pub async fn whisper_delete_corrupted_model(model_name: String) -> Result<String
 
 /// Open the models folder in the system file explorer
 #[command]
-pub async fn open_models_folder() -> Result<(), String> {
-    let models_dir = get_models_directory()
-        .ok_or_else(|| "Models directory not initialized".to_string())?;
+pub async fn open_models_folder(app: AppHandle) -> Result<(), String> {
+    // Get the effective models directory (custom or default)
+    let models_dir = match crate::storage_preferences::get_models_directory_path(&app).await {
+        Ok(path) => path,
+        Err(e) => {
+            log::warn!("Failed to get custom models path, using default: {}", e);
+            get_models_directory()
+                .ok_or_else(|| "Models directory not initialized".to_string())?
+        }
+    };
 
     // Ensure directory exists before trying to open it
     if !models_dir.exists() {
@@ -502,4 +518,26 @@ pub async fn open_models_folder() -> Result<(), String> {
 
     log::info!("Opened models folder: {}", folder_path);
     Ok(())
+}
+
+/// Open a dialog to select a folder for models storage
+#[command]
+pub async fn select_models_folder(app: AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    log::info!("Opening dialog to select models folder");
+
+    let folder_path = app
+        .dialog()
+        .file()
+        .blocking_pick_folder();
+
+    if let Some(path) = folder_path {
+        let path_str = path.to_string();
+        log::info!("User selected models folder: {}", path_str);
+        Ok(Some(path_str))
+    } else {
+        log::info!("User cancelled folder selection");
+        Ok(None)
+    }
 }
