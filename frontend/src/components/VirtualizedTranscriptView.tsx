@@ -9,6 +9,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { RecordingStatusBar } from "./RecordingStatusBar";
 import { motion, AnimatePresence } from "framer-motion";
 import { TranscriptSegmentData } from "@/types";
+import { getSpeakerColor } from "./SpeakerTagModal";
 
 export interface VirtualizedTranscriptViewProps {
     /** Transcript segments to display */
@@ -80,6 +81,8 @@ const TranscriptSegment = memo(function TranscriptSegment({
     showConfidence,
     onClick,
     isActive,
+    speakerId,
+    speakerLabel,
 }: {
     id: string;
     timestamp: number;
@@ -90,8 +93,11 @@ const TranscriptSegment = memo(function TranscriptSegment({
     showConfidence: boolean;
     onClick?: () => void;
     isActive?: boolean;
+    speakerId?: string;
+    speakerLabel?: string;
 }) {
     const displayText = cleanStopWords(text) || (text.trim() === '' ? '[Silence]' : text);
+    const speakerColor = speakerId ? getSpeakerColor(speakerId) : null;
 
     return (
         <div 
@@ -99,6 +105,14 @@ const TranscriptSegment = memo(function TranscriptSegment({
             className={`mb-3 ${isActive ? 'bg-blue-50 -mx-2 px-2 py-1 rounded-lg border-l-2 border-blue-500' : ''}`}
         >
             <div className="flex items-start gap-2">
+                {/* Speaker Label */}
+                {speakerLabel && speakerColor && (
+                    <span 
+                        className={`text-xs mt-1 flex-shrink-0 px-2 py-0.5 rounded-full ${speakerColor.bg} ${speakerColor.text} font-medium`}
+                    >
+                        {speakerLabel}
+                    </span>
+                )}
                 <Tooltip>
                     <TooltipTrigger asChild>
                         <button
@@ -346,6 +360,8 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         showConfidence={showConfidence}
                                         onClick={onSegmentClick ? () => onSegmentClick(segment.timestamp) : undefined}
                                         isActive={isSegmentActive(segment, virtualRow.index)}
+                                        speakerId={segment.speaker_id}
+                                        speakerLabel={segment.speaker_label}
                                     />
                                 </div>
                             );
@@ -405,6 +421,8 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         showConfidence={showConfidence}
                                         onClick={onSegmentClick ? () => onSegmentClick(segment.timestamp) : undefined}
                                         isActive={isSegmentActive(segment, index)}
+                                        speakerId={segment.speaker_id}
+                                        speakerLabel={segment.speaker_label}
                                     />
                                 </motion.div>
                             );

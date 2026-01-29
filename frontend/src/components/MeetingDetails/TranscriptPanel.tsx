@@ -33,6 +33,11 @@ interface TranscriptPanelProps {
   audioFilePath?: string | null;
   audioPlayerRef?: Ref<AudioPlayerRef>;
   onAudioTimeUpdate?: (time: number) => void;
+  
+  // Speaker enhancement props
+  onFullEnhance?: () => void;
+  onQuickLabel?: () => void;
+  onTagClick?: () => void;
 }
 
 export function TranscriptPanel({
@@ -55,6 +60,9 @@ export function TranscriptPanel({
   audioFilePath,
   audioPlayerRef,
   onAudioTimeUpdate,
+  onFullEnhance,
+  onQuickLabel,
+  onTagClick,
 }: TranscriptPanelProps) {
   // Convert transcripts to segments if pagination is not used but we want virtualization
   const convertedSegments = useMemo(() => {
@@ -68,6 +76,8 @@ export function TranscriptPanel({
       endTime: t.audio_end_time,
       text: t.text,
       confidence: t.confidence,
+      speaker_id: t.speaker_id,
+      speaker_label: t.speaker_label,
     }));
   }, [transcripts, usePagination, segments]);
 
@@ -121,6 +131,9 @@ export function TranscriptPanel({
           ref={audioPlayerRef}
           audioFilePath={audioFilePath ?? null}
           onTimeUpdate={onAudioTimeUpdate}
+          onFullEnhance={onFullEnhance}
+          onQuickLabel={onQuickLabel}
+          onTagClick={onTagClick}
         />
       )}
     </div>

@@ -3,11 +3,18 @@
 import React, { useRef, useState, useEffect, forwardRef, useImperativeHandle, useCallback } from 'react';
 import { Play, Pause, User } from 'lucide-react';
 import { invoke, convertFileSrc } from '@tauri-apps/api/core';
+import { EnhanceButton } from './EnhanceButton';
 
 interface AudioPlayerProps {
   audioFilePath: string | null;
   onTimeUpdate?: (time: number) => void;
   className?: string;
+  /** Callback when "Full enhance" is selected from the dropdown */
+  onFullEnhance?: () => void;
+  /** Callback when "Quick label" is selected from the dropdown */
+  onQuickLabel?: () => void;
+  /** Callback when "Tag" button is clicked */
+  onTagClick?: () => void;
 }
 
 export interface AudioPlayerRef {
@@ -40,7 +47,7 @@ function base64ToBlob(base64: string, mimeType: string): Blob {
 }
 
 export const AudioPlayer = forwardRef<AudioPlayerRef, AudioPlayerProps>(
-  ({ audioFilePath, onTimeUpdate, className = '' }, ref) => {
+  ({ audioFilePath, onTimeUpdate, className = '', onFullEnhance, onQuickLabel, onTagClick }, ref) => {
     const [isPlaying, setIsPlaying] = useState(false);
     const [currentTime, setCurrentTime] = useState(0);
     const [duration, setDuration] = useState(0);
@@ -258,6 +265,7 @@ export const AudioPlayer = forwardRef<AudioPlayerRef, AudioPlayerProps>(
             className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 rounded-md text-sm text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             type="button"
             disabled={isDisabled}
+            onClick={onTagClick}
           >
             <User className="w-4 h-4" />
             <span>Tag</span>
@@ -313,19 +321,11 @@ export const AudioPlayer = forwardRef<AudioPlayerRef, AudioPlayerProps>(
           </span>
 
           {/* Enhance Button */}
-          <button
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 border border-gray-200 rounded-md text-sm text-gray-600 hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            type="button"
+          <EnhanceButton
+            onFullEnhance={onFullEnhance || (() => {})}
+            onQuickLabel={onQuickLabel || (() => {})}
             disabled={isDisabled}
-          >
-            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M12 3v3m0 12v3M3 12h3m12 0h3M5.636 5.636l2.121 2.121m8.486 8.486l2.121 2.121M5.636 18.364l2.121-2.121m8.486-8.486l2.121-2.121" />
-            </svg>
-            <span>Enhance</span>
-            <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M3 4.5l3 3 3-3" />
-            </svg>
-          </button>
+          />
         </div>
 
         {/* Error Message - only show if there's an error AND we have an audio file */}
