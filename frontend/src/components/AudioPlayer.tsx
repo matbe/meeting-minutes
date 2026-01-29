@@ -2,6 +2,7 @@
 
 import React, { useRef, useState, useEffect, forwardRef, useImperativeHandle, useCallback } from 'react';
 import { Play, Pause, User } from 'lucide-react';
+import { convertFileSrc } from '@tauri-apps/api/core';
 
 interface AudioPlayerProps {
   audioFilePath: string | null;
@@ -20,22 +21,6 @@ function formatTime(seconds: number): string {
   const mins = Math.floor(seconds / 60);
   const secs = Math.floor(seconds % 60);
   return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-}
-
-// Convert file path to Tauri asset URL
-// In Tauri 2.x, asset protocol uses https://asset.localhost/<encoded-path>
-function buildAssetUrl(filePath: string): string {
-  // On Windows, convert backslashes to forward slashes
-  const normalizedPath = filePath.replace(/\\/g, '/');
-  // Ensure path starts with /
-  const cleanPath = normalizedPath.startsWith('/') ? normalizedPath : '/' + normalizedPath;
-  // URL-encode the path, but preserve forward slashes
-  const encodedPath = cleanPath
-    .split('/')
-    .map(segment => encodeURIComponent(segment))
-    .join('/');
-  // Use https://asset.localhost for Tauri 2.x
-  return `https://asset.localhost${encodedPath}`;
 }
 
 export const AudioPlayer = forwardRef<AudioPlayerRef, AudioPlayerProps>(
@@ -79,9 +64,9 @@ export const AudioPlayer = forwardRef<AudioPlayerRef, AudioPlayerProps>(
       // Create audio element with the file path
       const audio = new Audio();
       
-      // Convert file path to Tauri asset URL (handles path separators correctly)
-      const assetUrl = buildAssetUrl(audioFilePath);
-      console.log('🔊 Loading audio from:', assetUrl);
+      // Use Tauri's official convertFileSrc to get the correct asset URL
+      const assetUrl = convertFileSrc(audioFilePath);
+      console.log('🔊 Loading audio from:', assetUrl, '(original path:', audioFilePath, ')');
       audio.src = assetUrl;
 
       audio.onloadedmetadata = () => {
