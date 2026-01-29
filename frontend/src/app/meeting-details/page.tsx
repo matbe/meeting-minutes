@@ -132,7 +132,7 @@ function MeetingDetailsContent() {
         created_at: metadata.created_at,
         updated_at: metadata.updated_at,
         transcripts: transcripts, // Paginated transcripts from hook
-        folder_path: metadata.folder_path, // Include folder_path for audio player
+        folder_path: metadata.folder_path, // Include folder_path for audio player and retranscription
       });
 
       // Sync with sidebar context
