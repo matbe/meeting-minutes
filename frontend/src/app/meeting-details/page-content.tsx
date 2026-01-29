@@ -2,13 +2,14 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
-import { Summary, SummaryResponse, Speaker, TranscriptSegmentData } from '@/types';
+import { Summary, SummaryResponse, Speaker, TranscriptSegmentData, SpeakerLabel } from '@/types';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import Analytics from '@/lib/analytics';
 import { TranscriptPanel } from '@/components/MeetingDetails/TranscriptPanel';
 import { SummaryPanel } from '@/components/MeetingDetails/SummaryPanel';
 import { AudioPlayer, AudioPlayerRef } from '@/components/AudioPlayer';
 import { SpeakerTagModal } from '@/components/SpeakerTagModal';
+import { toast } from 'sonner';
 
 // Custom hooks
 import { useMeetingData } from '@/hooks/meeting-details/useMeetingData';
@@ -66,8 +67,10 @@ export default function PageContent({
   const [speakers, setSpeakers] = useState<Speaker[]>([]);
   const [playingSpeakerId, setPlayingSpeakerId] = useState<string | null>(null);
   const speakerSampleTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  // Speaker labels mapping: speaker_id -> label (for updating transcript display)
-  const [speakerLabels, setSpeakerLabels] = useState<Record<string, string>>({});
+  // Speaker labels mapping: segment_id -> { speaker_id, speaker_label }
+  const [segmentSpeakerMap, setSegmentSpeakerMap] = useState<Record<string, { speakerId: string; speakerLabel: string }>>({});
+  // Whether diarization is in progress
+  const [isEnhancing, setIsEnhancing] = useState(false);
 
   // Ref to store the modal open function from SummaryGeneratorButtonGroup
   const openModelSettingsRef = useRef<(() => void) | null>(null);
@@ -183,12 +186,34 @@ export default function PageContent({
   // Speaker enhancement handlers
   const handleFullEnhance = useCallback(async () => {
     console.log('🎤 Full enhance (re-transcribe with diarization) requested');
+    setIsEnhancing(true);
+    
     try {
-      // TODO: Call diarization API
-      await invoke('retranscribe_with_diarization', { meetingId: meeting.id });
+      // Call diarization API - this returns speaker labels for all segments
+      const speakerLabelsResult = await invoke<SpeakerLabel[]>('retranscribe_with_diarization', { meetingId: meeting.id });
+      
+      console.log('✅ Diarization complete:', speakerLabelsResult.length, 'segments labeled');
+      
+      // Build segment -> speaker mapping
+      const newSegmentSpeakerMap: Record<string, { speakerId: string; speakerLabel: string }> = {};
+      speakerLabelsResult.forEach(label => {
+        newSegmentSpeakerMap[label.segmentId] = {
+          speakerId: label.speakerId,
+          speakerLabel: label.speakerLabel,
+        };
+      });
+      setSegmentSpeakerMap(newSegmentSpeakerMap);
+      
+      // Fetch the detected speakers for the modal
+      const detectedSpeakers = await invoke<Speaker[]>('get_meeting_speakers', { meetingId: meeting.id });
+      setSpeakers(detectedSpeakers);
+      
+      toast.success(`Speaker detection complete! Found ${detectedSpeakers.length} speakers.`);
     } catch (err) {
       console.error('Failed to retranscribe with diarization:', err);
-      // TODO: Show error notification
+      toast.error('Failed to detect speakers. Please try again.');
+    } finally {
+      setIsEnhancing(false);
     }
   }, [meeting.id]);
 
@@ -199,23 +224,16 @@ export default function PageContent({
       const existingSpeakers = await invoke<Speaker[]>('get_meeting_speakers', { meetingId: meeting.id });
       
       if (existingSpeakers.length === 0) {
-        // Generate mock speakers for demo if none exist
-        // In production, this would only show after diarization is run
-        const mockSpeakers: Speaker[] = [
-          { id: 'speaker_1', label: 'Speaker 1', segments: 12, totalDuration: 180 },
-          { id: 'speaker_2', label: 'Speaker 2', segments: 8, totalDuration: 120 },
-        ];
-        setSpeakers(mockSpeakers);
-      } else {
-        setSpeakers(existingSpeakers);
+        // No speakers detected yet - show message
+        toast.info('No speakers detected. Run "Full enhance" first to detect speakers.');
+        return;
       }
       
+      setSpeakers(existingSpeakers);
       setIsSpeakerModalOpen(true);
     } catch (err) {
       console.error('Failed to get meeting speakers:', err);
-      // Open modal with empty speakers
-      setSpeakers([]);
-      setIsSpeakerModalOpen(true);
+      toast.error('Failed to load speakers.');
     }
   }, [meeting.id]);
 
@@ -227,22 +245,29 @@ export default function PageContent({
   const handleSaveSpeakers = useCallback(async (updatedSpeakers: Speaker[]) => {
     console.log('💾 Saving speaker labels:', updatedSpeakers);
     try {
-      await invoke('update_speaker_labels', {
+      // Call backend to update labels and get back updated segment mappings
+      const updatedLabels = await invoke<SpeakerLabel[]>('update_speaker_labels', {
         meetingId: meeting.id,
         speakers: updatedSpeakers,
       });
+      
       setSpeakers(updatedSpeakers);
       
-      // Update speaker labels mapping for transcript display
-      const newLabels: Record<string, string> = {};
-      updatedSpeakers.forEach(speaker => {
-        newLabels[speaker.id] = speaker.label;
+      // Update segment -> speaker mapping with new labels
+      const newSegmentSpeakerMap: Record<string, { speakerId: string; speakerLabel: string }> = {};
+      updatedLabels.forEach(label => {
+        newSegmentSpeakerMap[label.segmentId] = {
+          speakerId: label.speakerId,
+          speakerLabel: label.speakerLabel,
+        };
       });
-      setSpeakerLabels(newLabels);
+      setSegmentSpeakerMap(newSegmentSpeakerMap);
       
-      console.log('✅ Speaker labels updated:', newLabels);
+      console.log('✅ Speaker labels updated');
+      toast.success('Speaker names saved!');
     } catch (err) {
       console.error('Failed to save speaker labels:', err);
+      toast.error('Failed to save speaker names. Please try again.');
     }
   }, [meeting.id]);
 
@@ -286,18 +311,23 @@ export default function PageContent({
   const enhancedSegments = useMemo(() => {
     if (!segments) return undefined;
     
-    // Apply speaker labels from the mapping (after user saves labels in modal)
+    // Apply speaker labels from diarization results
     return segments.map(segment => {
-      const speakerId = segment.speaker_id;
-      const updatedLabel = speakerId ? speakerLabels[speakerId] : undefined;
+      // Check if we have speaker info for this segment from diarization
+      const speakerInfo = segmentSpeakerMap[segment.id];
       
-      return {
-        ...segment,
-        // Use the updated label if available, otherwise keep original
-        speaker_label: updatedLabel ?? segment.speaker_label,
-      };
+      if (speakerInfo) {
+        return {
+          ...segment,
+          speaker_id: speakerInfo.speakerId,
+          speaker_label: speakerInfo.speakerLabel,
+        };
+      }
+      
+      // No diarization result for this segment - keep original (will show "Guest")
+      return segment;
     });
-  }, [segments, speakerLabels]);
+  }, [segments, segmentSpeakerMap]);
 
   // Auto-generate summary when flag is set
   useEffect(() => {

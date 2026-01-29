@@ -697,6 +697,7 @@ pub fn run() {
             // Speaker diarization commands
             audio::speaker_commands::retranscribe_with_diarization,
             audio::speaker_commands::get_meeting_speakers,
+            audio::speaker_commands::get_speaker_labels,
             audio::speaker_commands::update_speaker_labels,
             audio::speaker_commands::get_speaker_audio_sample,
             // Database import commands

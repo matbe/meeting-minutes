@@ -123,3 +123,10 @@ export interface Speaker {
   totalDuration: number;       // Total speaking duration in seconds
   sampleAudioStart?: number;   // Start time of a sample audio clip for this speaker
 }
+
+// Speaker label assignment for a transcript segment
+export interface SpeakerLabel {
+  segmentId: string;           // Transcript segment ID
+  speakerId: string;           // Speaker ID
+  speakerLabel: string;        // Display label for the speaker
+}
