@@ -1436,3 +1436,34 @@ pub async fn get_meeting_audio_path(meeting_folder: String) -> Result<Option<Str
     log::info!("🔊 [AudioPath] No audio file found. Files in folder: {:?}", files_found);
     Ok(None)
 }
+
+/// Read the audio file as base64 data
+/// This is used when the asset protocol doesn't work reliably
+#[tauri::command]
+pub async fn get_meeting_audio_data(audio_path: String) -> Result<String, String> {
+    log::info!("🔊 [AudioData] Reading audio file: {}", audio_path);
+    
+    let path = std::path::Path::new(&audio_path);
+    
+    if !path.exists() {
+        log::error!("🔊 [AudioData] File does not exist: {}", audio_path);
+        return Err(format!("Audio file does not exist: {}", audio_path));
+    }
+    
+    match std::fs::read(path) {
+        Ok(data) => {
+            log::info!("🔊 [AudioData] File read successfully, size: {} bytes", data.len());
+            
+            // Encode as base64
+            use base64::{Engine as _, engine::general_purpose::STANDARD};
+            let base64_data = STANDARD.encode(&data);
+            log::info!("🔊 [AudioData] Encoded to base64, length: {} chars", base64_data.len());
+            
+            Ok(base64_data)
+        }
+        Err(e) => {
+            log::error!("🔊 [AudioData] Failed to read file: {}", e);
+            Err(format!("Failed to read audio file: {}", e))
+        }
+    }
+}
