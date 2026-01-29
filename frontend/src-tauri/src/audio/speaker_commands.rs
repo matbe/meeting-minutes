@@ -495,52 +495,61 @@ pub async fn update_speaker_labels(
         speakers.len()
     );
 
-    // Get existing labels and update them with new speaker names
-    let mut cache = DIARIZATION_CACHE
-        .lock()
-        .map_err(|e| format!("Cache lock error: {}", e))?;
+    // Collect data from cache within a limited scope (so MutexGuard is dropped before await)
+    let updated_labels = {
+        let mut cache = DIARIZATION_CACHE
+            .lock()
+            .map_err(|e| format!("Cache lock error: {}", e))?;
 
-    if let Some((labels, cached_speakers)) = cache.get_mut(&meeting_id) {
-        // Create a mapping of speaker_id to new label
-        let label_map: HashMap<String, String> = speakers
-            .iter()
-            .map(|s| (s.id.clone(), s.label.clone()))
-            .collect();
+        if let Some((labels, cached_speakers)) = cache.get_mut(&meeting_id) {
+            // Create a mapping of speaker_id to new label
+            let label_map: HashMap<String, String> = speakers
+                .iter()
+                .map(|s| (s.id.clone(), s.label.clone()))
+                .collect();
 
-        // Update labels
-        for label in labels.iter_mut() {
-            if let Some(new_label) = label_map.get(&label.speaker_id) {
-                label.speaker_label = new_label.clone();
+            // Update labels
+            for label in labels.iter_mut() {
+                if let Some(new_label) = label_map.get(&label.speaker_id) {
+                    label.speaker_label = new_label.clone();
+                }
             }
-        }
 
-        // Update cached speakers
-        for cached_speaker in cached_speakers.iter_mut() {
-            if let Some(new_label) = label_map.get(&cached_speaker.id) {
-                cached_speaker.label = new_label.clone();
+            // Update cached speakers
+            for cached_speaker in cached_speakers.iter_mut() {
+                if let Some(new_label) = label_map.get(&cached_speaker.id) {
+                    cached_speaker.label = new_label.clone();
+                }
             }
-        }
 
-        // Persist speaker labels to database
-        let pool = state.db_manager.pool();
-        for speaker in &speakers {
-            if let Err(e) = save_speaker_label_to_db(pool, &meeting_id, &speaker.id, &speaker.label).await {
-                log::error!("Failed to persist speaker label: {}", e);
-            }
+            Some(labels.clone())
+        } else {
+            None
         }
+    }; // MutexGuard is dropped here
 
-        // Update transcript records with speaker labels
-        for label in labels.iter() {
-            if let Err(e) = update_transcript_speaker_label(pool, &meeting_id, &label.segment_id, &label.speaker_id, &label.speaker_label).await {
-                log::error!("Failed to update transcript speaker label: {}", e);
-            }
+    // Check if we found the meeting in cache
+    let updated_labels = updated_labels.ok_or_else(|| {
+        "No diarization results found. Run 'Full enhance' first.".to_string()
+    })?;
+
+    // Now perform async database operations without holding the lock
+    let pool = state.db_manager.pool();
+    for speaker in &speakers {
+        if let Err(e) = save_speaker_label_to_db(pool, &meeting_id, &speaker.id, &speaker.label).await {
+            log::error!("Failed to persist speaker label: {}", e);
         }
-
-        log::info!("Updated and persisted speaker labels for meeting {}", meeting_id);
-        return Ok(labels.clone());
     }
 
-    Err("No diarization results found. Run 'Full enhance' first.".to_string())
+    // Update transcript records with speaker labels
+    for label in &updated_labels {
+        if let Err(e) = update_transcript_speaker_label(pool, &meeting_id, &label.segment_id, &label.speaker_id, &label.speaker_label).await {
+            log::error!("Failed to update transcript speaker label: {}", e);
+        }
+    }
+
+    log::info!("Updated and persisted speaker labels for meeting {}", meeting_id);
+    Ok(updated_labels)
 }
 
 /// Save a speaker label mapping to the database
