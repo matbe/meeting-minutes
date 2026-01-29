@@ -9,6 +9,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { RecordingStatusBar } from "./RecordingStatusBar";
 import { motion, AnimatePresence } from "framer-motion";
 import { TranscriptSegmentData } from "@/types";
+import { SPEAKER_COLORS, getSpeakerColorIndex } from "@/lib/speakerColors";
 
 export interface VirtualizedTranscriptViewProps {
     /** Transcript segments to display */
@@ -71,6 +72,8 @@ const TranscriptSegment = memo(function TranscriptSegment({
     confidence,
     isStreaming,
     showConfidence,
+    speakerId,
+    speakerLabel,
 }: {
     id: string;
     timestamp: number;
@@ -78,12 +81,30 @@ const TranscriptSegment = memo(function TranscriptSegment({
     confidence?: number;
     isStreaming: boolean;
     showConfidence: boolean;
+    speakerId?: string;
+    speakerLabel?: string;
 }) {
     const displayText = cleanStopWords(text) || (text.trim() === '' ? '[Silence]' : text);
+    
+    // Get speaker color
+    const speakerColor = speakerId 
+        ? SPEAKER_COLORS[getSpeakerColorIndex(speakerId)]
+        : null;
 
     return (
         <div id={`segment-${id}`} className="mb-3">
             <div className="flex items-start gap-2">
+                {/* Speaker label (if available) */}
+                {speakerLabel && speakerColor && (
+                    <span 
+                        role="status"
+                        aria-label={`Speaker: ${speakerLabel}`}
+                        className={`text-xs px-1.5 py-0.5 rounded mt-0.5 shrink-0 ${speakerColor.bg} ${speakerColor.text}`}
+                        title={`Speaker: ${speakerLabel}`}
+                    >
+                        {speakerLabel}
+                    </span>
+                )}
                 <Tooltip>
                     <TooltipTrigger>
                         <span className="text-xs text-gray-400 mt-1 flex-shrink-0 min-w-[50px]">
@@ -296,6 +317,8 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         confidence={segment.confidence}
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
+                                        speakerId={segment.speaker_id}
+                                        speakerLabel={segment.speaker_label}
                                     />
                                 </div>
                             );
@@ -352,6 +375,8 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         confidence={segment.confidence}
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
+                                        speakerId={segment.speaker_id}
+                                        speakerLabel={segment.speaker_label}
                                     />
                                 </motion.div>
                             );
