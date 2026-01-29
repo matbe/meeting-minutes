@@ -8,6 +8,7 @@ use tauri::command;
 
 /// Represents a detected speaker in the meeting
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Speaker {
     /// Unique identifier for the speaker
     pub id: String,
@@ -23,6 +24,7 @@ pub struct Speaker {
 
 /// Represents speaker labels for transcript segments
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SpeakerLabel {
     /// Transcript segment ID
     pub segment_id: String,

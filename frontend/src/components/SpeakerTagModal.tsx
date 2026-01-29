@@ -69,7 +69,8 @@ interface SpeakerRowProps {
 function SpeakerRow({ speaker, index, isPlaying, onPlay, onLabelChange }: SpeakerRowProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(speaker.label);
-  const color = SPEAKER_COLORS[index % SPEAKER_COLORS.length];
+  // Use getSpeakerColor for consistent colors across components
+  const color = getSpeakerColor(speaker.id);
 
   const handleSave = useCallback(() => {
     if (editValue.trim()) {

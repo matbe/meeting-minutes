@@ -65,6 +65,7 @@ export default function PageContent({
   const [isSpeakerModalOpen, setIsSpeakerModalOpen] = useState(false);
   const [speakers, setSpeakers] = useState<Speaker[]>([]);
   const [playingSpeakerId, setPlayingSpeakerId] = useState<string | null>(null);
+  const speakerSampleTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Ref to store the modal open function from SummaryGeneratorButtonGroup
   const openModelSettingsRef = useRef<(() => void) | null>(null);
@@ -238,22 +239,38 @@ export default function PageContent({
   const handlePlaySpeakerSample = useCallback(async (speaker: Speaker) => {
     console.log('▶️ Playing sample for speaker:', speaker.label);
     
+    // Clear any existing timeout
+    if (speakerSampleTimeoutRef.current) {
+      clearTimeout(speakerSampleTimeoutRef.current);
+      speakerSampleTimeoutRef.current = null;
+    }
+    
     if (playingSpeakerId === speaker.id) {
       // Stop playback
       setPlayingSpeakerId(null);
       return;
     }
     
-    // Get sample audio start time
+    // Get sample audio start time and seek to it
     const sampleStart = speaker.sampleAudioStart ?? 0;
     audioPlayerRef.current?.seekTo(sampleStart);
     setPlayingSpeakerId(speaker.id);
     
     // Auto-stop after 5 seconds
-    setTimeout(() => {
+    speakerSampleTimeoutRef.current = setTimeout(() => {
       setPlayingSpeakerId(null);
+      speakerSampleTimeoutRef.current = null;
     }, 5000);
   }, [playingSpeakerId]);
+
+  // Cleanup speaker sample timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (speakerSampleTimeoutRef.current) {
+        clearTimeout(speakerSampleTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Auto-generate summary when flag is set
   useEffect(() => {
