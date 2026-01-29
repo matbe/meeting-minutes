@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { Summary, SummaryResponse } from '@/types';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
@@ -52,6 +52,9 @@ export default function PageContent({
   const [customPrompt, setCustomPrompt] = useState<string>('');
   const [isRecording] = useState(false);
   const [summaryResponse] = useState<SummaryResponse | null>(null);
+
+  // Speaker enhancement state
+  const [isPlayingSpeaker, setIsPlayingSpeaker] = useState<string | null>(null);
 
   // Ref to store the modal open function from SummaryGeneratorButtonGroup
   const openModelSettingsRef = useRef<(() => void) | null>(null);
@@ -142,6 +145,32 @@ export default function PageContent({
     };
   }, [shouldAutoGenerate, meeting.id]); // Re-run if meeting changes
 
+  // Speaker enhancement handlers
+  const handleFullEnhance = useCallback(() => {
+    console.log('🎤 Full enhance requested for meeting:', meeting.id);
+    // TODO: Implement full re-transcription with diarization
+    // This will call a Tauri command to re-process audio with speaker diarization
+    Analytics.trackButtonClick('full_enhance_initiated', 'meeting_details');
+  }, [meeting.id]);
+
+  const handleSaveSpeakerLabel = useCallback((speakerId: string, newLabel: string) => {
+    console.log('💾 Saving speaker label:', speakerId, '->', newLabel);
+    // TODO: Implement speaker label update via Tauri command
+    Analytics.trackButtonClick('speaker_label_saved', 'meeting_details');
+  }, []);
+
+  const handlePlaySpeakerSample = useCallback((speakerId: string, startTime: number) => {
+    console.log('▶️ Playing speaker sample:', speakerId, 'at', startTime);
+    setIsPlayingSpeaker(speakerId);
+    // TODO: Implement audio playback at specific timestamp
+  }, []);
+
+  const handleStopPlayback = useCallback(() => {
+    console.log('⏹️ Stopping playback');
+    setIsPlayingSpeaker(null);
+    // TODO: Stop audio playback
+  }, []);
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -166,6 +195,12 @@ export default function PageContent({
           totalCount={totalCount}
           loadedCount={loadedCount}
           onLoadMore={onLoadMore}
+          // Speaker enhancement props
+          onFullEnhance={handleFullEnhance}
+          onSaveSpeakerLabel={handleSaveSpeakerLabel}
+          onPlaySpeakerSample={handlePlaySpeakerSample}
+          onStopPlayback={handleStopPlayback}
+          isPlayingSpeaker={isPlayingSpeaker}
         />
         <SummaryPanel
           meeting={meeting}

@@ -1,10 +1,11 @@
 "use client";
 
-import { Transcript, TranscriptSegmentData } from '@/types';
+import { Transcript, TranscriptSegmentData, Speaker } from '@/types';
 import { TranscriptView } from '@/components/TranscriptView';
 import { VirtualizedTranscriptView } from '@/components/VirtualizedTranscriptView';
 import { TranscriptButtonGroup } from './TranscriptButtonGroup';
-import { useMemo } from 'react';
+import { SpeakerTagModal } from '@/components/SpeakerTagModal';
+import { useMemo, useState, useCallback } from 'react';
 
 interface TranscriptPanelProps {
   transcripts: Transcript[];
@@ -23,6 +24,13 @@ interface TranscriptPanelProps {
   totalCount?: number;
   loadedCount?: number;
   onLoadMore?: () => void;
+
+  // Speaker recognition props
+  onFullEnhance?: () => void;
+  onSaveSpeakerLabel?: (speakerId: string, newLabel: string) => void;
+  onPlaySpeakerSample?: (speakerId: string, startTime: number) => void;
+  onStopPlayback?: () => void;
+  isPlayingSpeaker?: string | null;
 }
 
 export function TranscriptPanel({
@@ -40,7 +48,15 @@ export function TranscriptPanel({
   totalCount,
   loadedCount,
   onLoadMore,
+  onFullEnhance,
+  onSaveSpeakerLabel,
+  onPlaySpeakerSample,
+  onStopPlayback,
+  isPlayingSpeaker,
 }: TranscriptPanelProps) {
+  // State for speaker tag modal
+  const [isSpeakerModalOpen, setIsSpeakerModalOpen] = useState(false);
+
   // Convert transcripts to segments if pagination is not used but we want virtualization
   const convertedSegments = useMemo(() => {
     if (usePagination && segments) {
@@ -53,8 +69,55 @@ export function TranscriptPanel({
       endTime: t.audio_end_time,
       text: t.text,
       confidence: t.confidence,
+      speaker_id: t.speaker_id,
+      speaker_label: t.speaker_label,
     }));
   }, [transcripts, usePagination, segments]);
+
+  // Extract unique speakers from segments
+  const speakers = useMemo((): Speaker[] => {
+    const speakerMap = new Map<string, { segments: number; totalDuration: number; firstTimestamp: number }>();
+    
+    const segs = usePagination && segments ? segments : convertedSegments;
+    
+    for (const segment of segs) {
+      if (segment.speaker_id) {
+        const existing = speakerMap.get(segment.speaker_id);
+        const duration = (segment.endTime ?? segment.timestamp) - segment.timestamp;
+        
+        if (existing) {
+          existing.segments += 1;
+          existing.totalDuration += duration;
+        } else {
+          speakerMap.set(segment.speaker_id, {
+            segments: 1,
+            totalDuration: duration,
+            firstTimestamp: segment.timestamp,
+          });
+        }
+      }
+    }
+
+    return Array.from(speakerMap.entries()).map(([id, data]) => ({
+      id,
+      label: segs.find(s => s.speaker_id === id)?.speaker_label || id,
+      segments: data.segments,
+      totalDuration: data.totalDuration,
+      sampleAudioStart: data.firstTimestamp,
+    }));
+  }, [convertedSegments, segments, usePagination]);
+
+  const handleQuickLabel = useCallback(() => {
+    setIsSpeakerModalOpen(true);
+  }, []);
+
+  const handleCloseSpeakerModal = useCallback(() => {
+    setIsSpeakerModalOpen(false);
+  }, []);
+
+  const handleSaveSpeakerLabel = useCallback((speakerId: string, newLabel: string) => {
+    onSaveSpeakerLabel?.(speakerId, newLabel);
+  }, [onSaveSpeakerLabel]);
 
   return (
     <div className="hidden md:flex md:w-1/4 lg:w-1/3 min-w-0 border-r border-gray-200 bg-white flex-col relative shrink-0">
@@ -64,6 +127,8 @@ export function TranscriptPanel({
           transcriptCount={usePagination ? (totalCount ?? convertedSegments.length) : (transcripts?.length || 0)}
           onCopyTranscript={onCopyTranscript}
           onOpenMeetingFolder={onOpenMeetingFolder}
+          onFullEnhance={onFullEnhance}
+          onQuickLabel={handleQuickLabel}
         />
       </div>
 
@@ -97,6 +162,17 @@ export function TranscriptPanel({
           />
         </div>
       )}
+
+      {/* Speaker Tag Modal */}
+      <SpeakerTagModal
+        isOpen={isSpeakerModalOpen}
+        onClose={handleCloseSpeakerModal}
+        speakers={speakers}
+        onSaveSpeakerLabel={handleSaveSpeakerLabel}
+        onPlaySample={onPlaySpeakerSample}
+        onStopPlayback={onStopPlayback}
+        isPlaying={isPlayingSpeaker}
+      />
     </div>
   );
 }
