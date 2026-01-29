@@ -117,13 +117,11 @@ export function TranscriptPanel({
       
       {/* Audio Player - shown when audio file exists */}
       {audioFilePath && (
-        <div className="border-t border-gray-200 p-3 bg-gray-50">
-          <AudioPlayer
-            ref={audioPlayerRef}
-            audioFilePath={audioFilePath}
-            onTimeUpdate={onAudioTimeUpdate}
-          />
-        </div>
+        <AudioPlayer
+          ref={audioPlayerRef}
+          audioFilePath={audioFilePath}
+          onTimeUpdate={onAudioTimeUpdate}
+        />
       )}
     </div>
   );
