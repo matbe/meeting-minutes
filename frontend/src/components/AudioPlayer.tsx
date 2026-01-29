@@ -54,11 +54,13 @@ export const AudioPlayer = forwardRef<AudioPlayerRef, AudioPlayerProps>(
     // Handle audio file loading
     useEffect(() => {
       if (!audioFilePath) {
+        console.log('🔊 [AudioPlayer] No audio file path provided');
         setIsLoading(false);
         setError('No audio file available');
         return;
       }
 
+      console.log('🔊 [AudioPlayer] Starting audio load for:', audioFilePath);
       setIsLoading(true);
       setError(null);
       
@@ -67,30 +69,42 @@ export const AudioPlayer = forwardRef<AudioPlayerRef, AudioPlayerProps>(
       // Load audio file using Tauri fs plugin and create blob URL
       const loadAudioFile = async () => {
         try {
-          console.log('🔊 Reading audio file:', audioFilePath);
+          console.log('🔊 [AudioPlayer] Step 1: Reading file with Tauri fs plugin...');
           
           // Read file as binary using Tauri's fs plugin
           const fileData = await readFile(audioFilePath);
-          console.log('🔊 File read successfully, size:', fileData.length, 'bytes');
+          console.log('🔊 [AudioPlayer] Step 2: File read successfully, size:', fileData.length, 'bytes');
+          
+          if (fileData.length === 0) {
+            throw new Error('File is empty (0 bytes)');
+          }
           
           // Create a blob from the file data
+          console.log('🔊 [AudioPlayer] Step 3: Creating blob...');
           const blob = new Blob([fileData], { type: 'audio/mp4' });
           blobUrl = URL.createObjectURL(blob);
-          console.log('🔊 Created blob URL:', blobUrl);
+          console.log('🔊 [AudioPlayer] Step 4: Blob URL created:', blobUrl);
           
           // Create audio element
+          console.log('🔊 [AudioPlayer] Step 5: Creating Audio element...');
           const audio = new Audio();
           audio.src = blobUrl;
 
           audio.onloadedmetadata = () => {
-            console.log('🔊 Audio loaded successfully, duration:', audio.duration);
+            console.log('🔊 [AudioPlayer] ✅ Audio loaded successfully!');
+            console.log('🔊 [AudioPlayer]   Duration:', audio.duration, 'seconds');
+            console.log('🔊 [AudioPlayer]   Ready state:', audio.readyState);
             setDuration(audio.duration);
             setIsLoading(false);
           };
 
           audio.onerror = (e) => {
-            console.error('🔊 Audio element error:', e);
-            setError('Failed to load audio file');
+            const errorDetails = audio.error 
+              ? `Code: ${audio.error.code}, Message: ${audio.error.message}`
+              : 'Unknown error';
+            console.error('🔊 [AudioPlayer] ❌ Audio element error:', errorDetails);
+            console.error('🔊 [AudioPlayer] Event:', e);
+            setError(`Audio decode error: ${errorDetails}`);
             setIsLoading(false);
           };
 
@@ -108,26 +122,31 @@ export const AudioPlayer = forwardRef<AudioPlayerRef, AudioPlayerProps>(
 
           audioRef.current = audio;
         } catch (err) {
-          console.error('🔊 Failed to read audio file:', err);
+          const errMsg = err instanceof Error ? err.message : String(err);
+          console.error('🔊 [AudioPlayer] ❌ Failed to read file with fs plugin:', errMsg);
           
           // Fallback: try using convertFileSrc (asset protocol)
-          console.log('🔊 Trying fallback with convertFileSrc...');
+          console.log('🔊 [AudioPlayer] Trying fallback with asset protocol...');
           try {
             const assetUrl = convertFileSrc(audioFilePath);
-            console.log('🔊 Fallback asset URL:', assetUrl);
+            console.log('🔊 [AudioPlayer] Fallback asset URL:', assetUrl);
             
             const audio = new Audio();
             audio.src = assetUrl;
 
             audio.onloadedmetadata = () => {
-              console.log('🔊 Audio loaded via asset protocol, duration:', audio.duration);
+              console.log('🔊 [AudioPlayer] ✅ Audio loaded via asset protocol!');
+              console.log('🔊 [AudioPlayer]   Duration:', audio.duration, 'seconds');
               setDuration(audio.duration);
               setIsLoading(false);
             };
 
             audio.onerror = (e) => {
-              console.error('🔊 Asset protocol also failed:', e);
-              setError('Failed to load audio file');
+              const errorDetails = audio.error 
+                ? `Code: ${audio.error.code}, Message: ${audio.error.message}`
+                : 'Unknown error';
+              console.error('🔊 [AudioPlayer] ❌ Asset protocol also failed:', errorDetails);
+              setError(`Failed to load audio: ${errMsg}`);
               setIsLoading(false);
             };
 
@@ -145,8 +164,9 @@ export const AudioPlayer = forwardRef<AudioPlayerRef, AudioPlayerProps>(
 
             audioRef.current = audio;
           } catch (fallbackErr) {
-            console.error('🔊 Fallback also failed:', fallbackErr);
-            setError('Failed to load audio file');
+            const fallbackErrMsg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
+            console.error('🔊 [AudioPlayer] ❌ Fallback also failed:', fallbackErrMsg);
+            setError(`Failed to load audio: ${errMsg}`);
             setIsLoading(false);
           }
         }
