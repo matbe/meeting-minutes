@@ -128,22 +128,37 @@ export default function PageContent({
   // Load audio file path for the meeting
   useEffect(() => {
     const loadAudioPath = async () => {
-      if (meeting.folder_path) {
-        try {
-          const path = await invoke<string | null>('get_meeting_audio_path', {
-            meetingFolder: meeting.folder_path
-          });
-          setAudioFilePath(path);
-          console.log('🎵 Audio file path:', path);
-        } catch (err) {
-          console.error('Failed to get audio file path:', err);
-          setAudioFilePath(null);
+      console.log('🎵 [AudioLoad] Starting audio path lookup...');
+      console.log('🎵 [AudioLoad] Meeting folder_path:', meeting.folder_path);
+      console.log('🎵 [AudioLoad] Meeting ID:', meeting.id);
+      
+      if (!meeting.folder_path) {
+        console.warn('🎵 [AudioLoad] No folder_path available for meeting');
+        setAudioFilePath(null);
+        return;
+      }
+      
+      try {
+        console.log('🎵 [AudioLoad] Invoking get_meeting_audio_path with:', meeting.folder_path);
+        const path = await invoke<string | null>('get_meeting_audio_path', {
+          meetingFolder: meeting.folder_path
+        });
+        
+        if (path) {
+          console.log('🎵 [AudioLoad] ✅ Found audio file:', path);
+        } else {
+          console.log('🎵 [AudioLoad] ⚠️ No audio file found in folder');
         }
+        
+        setAudioFilePath(path);
+      } catch (err) {
+        console.error('🎵 [AudioLoad] ❌ Error getting audio path:', err);
+        setAudioFilePath(null);
       }
     };
 
     loadAudioPath();
-  }, [meeting.folder_path]);
+  }, [meeting.folder_path, meeting.id]);
 
   // Handle transcript segment click - seek audio to that time
   const handleSegmentClick = useCallback((audioStartTime: number) => {

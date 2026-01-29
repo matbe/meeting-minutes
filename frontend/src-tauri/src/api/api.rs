@@ -1385,46 +1385,54 @@ pub async fn api_test_custom_openai_connection<R: Runtime>(
 /// Returns the first match, prioritizing audio.mp4 which is the default recording format
 #[tauri::command]
 pub async fn get_meeting_audio_path(meeting_folder: String) -> Result<Option<String>, String> {
-    log_debug!("Looking for audio file in folder: {}", meeting_folder);
+    log::info!("🔊 [AudioPath] Looking for audio file in folder: {}", meeting_folder);
 
     let folder_path = std::path::Path::new(&meeting_folder);
 
     if !folder_path.exists() {
-        log_warn!("Meeting folder does not exist: {}", meeting_folder);
-        return Ok(None);
+        log::warn!("🔊 [AudioPath] Meeting folder does not exist: {}", meeting_folder);
+        return Err(format!("Meeting folder does not exist: {}", meeting_folder));
     }
 
     // Verify it's a directory
     if !folder_path.is_dir() {
-        log_warn!("Path is not a directory: {}", meeting_folder);
-        return Err("Path is not a directory".to_string());
+        log::warn!("🔊 [AudioPath] Path is not a directory: {}", meeting_folder);
+        return Err(format!("Path is not a directory: {}", meeting_folder));
     }
 
     // Look for audio.mp4 first (the default name used by the recording system)
     let audio_mp4 = folder_path.join("audio.mp4");
+    log::info!("🔊 [AudioPath] Checking for audio.mp4 at: {:?}", audio_mp4);
     if audio_mp4.exists() {
-        log_debug!("Found audio.mp4 at: {:?}", audio_mp4);
-        return Ok(Some(audio_mp4.to_string_lossy().to_string()));
+        let path_str = audio_mp4.to_string_lossy().to_string();
+        log::info!("🔊 [AudioPath] Found audio.mp4: {}", path_str);
+        return Ok(Some(path_str));
     }
 
     // Supported audio file extensions
     const AUDIO_EXTENSIONS: &[&str] = &["mp4", "wav", "m4a", "webm", "ogg", "flac", "aac"];
 
     // Then look for any supported audio file
+    log::info!("🔊 [AudioPath] audio.mp4 not found, scanning for other audio files...");
     let entries = std::fs::read_dir(folder_path)
         .map_err(|e| format!("Failed to read meeting folder: {}", e))?;
 
+    let mut files_found: Vec<String> = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
+        let filename = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+        files_found.push(filename.clone());
+        
         if let Some(ext) = path.extension() {
             let ext_lower = ext.to_string_lossy().to_lowercase();
             if AUDIO_EXTENSIONS.contains(&ext_lower.as_str()) {
-                log_debug!("Found audio file: {:?}", path);
-                return Ok(Some(path.to_string_lossy().to_string()));
+                let path_str = path.to_string_lossy().to_string();
+                log::info!("🔊 [AudioPath] Found audio file: {}", path_str);
+                return Ok(Some(path_str));
             }
         }
     }
 
-    log_debug!("No audio file found in folder: {}", meeting_folder);
+    log::info!("🔊 [AudioPath] No audio file found. Files in folder: {:?}", files_found);
     Ok(None)
 }
