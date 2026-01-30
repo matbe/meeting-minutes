@@ -177,7 +177,7 @@ Native deployment offers optimal performance by running directly on the host sys
 ### Prerequisites
 
 #### Windows
-- Python 3.8+ (in PATH)
+- Python 3.10+ (in PATH) - **Required for speaker diarization feature**
 - Visual Studio Build Tools (C++ workload)
 - CMake
 - Git
@@ -186,7 +186,7 @@ Native deployment offers optimal performance by running directly on the host sys
 #### macOS
 - Xcode Command Line Tools: `xcode-select --install`
 - Homebrew: `/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"`
-- Python 3.8+: `brew install python3`
+- Python 3.10+: `brew install python3` - **Required for speaker diarization feature**
 - Dependencies: `brew install cmake llvm libomp`
 
 ### Windows Setup
@@ -331,7 +331,7 @@ cd backend
 If you prefer complete manual control over the installation process.
 
 ### System Requirements
-- Python 3.9+
+- Python 3.10+ (required for speaker diarization with pyannote.audio 4.x)
 - FFmpeg
 - C++ compiler (Visual Studio Build Tools/Xcode)
 - CMake
@@ -339,6 +339,7 @@ If you prefer complete manual control over the installation process.
 - Ollama (for LLM features)
 - ChromaDB
 - API Keys (Claude/Groq) if using external LLMs
+- Hugging Face token (for speaker diarization feature)
 
 ### Step-by-Step Installation
 
@@ -346,7 +347,7 @@ If you prefer complete manual control over the installation process.
 
 **Windows:**
 ```cmd
-# Python 3.9+ from Python.org (add to PATH)
+# Python 3.10+ from Python.org (add to PATH)
 # Visual Studio Build Tools (Desktop C++ workload)
 # CMake from CMake.org (add to PATH)
 # FFmpeg (download or: choco install ffmpeg)
@@ -360,7 +361,7 @@ If you prefer complete manual control over the installation process.
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 
 # Install dependencies
-brew install python@3.9 cmake llvm libomp ffmpeg git ollama
+brew install python@3.10 cmake llvm libomp ffmpeg git ollama
 ```
 
 #### 2. Install Python Dependencies
@@ -373,6 +374,21 @@ python -m pip install -r requirements.txt
 python3 -m pip install --upgrade pip
 python3 -m pip install -r requirements.txt
 ```
+
+**For GPU-accelerated speaker diarization (NVIDIA GPUs):**
+```bash
+# Install PyTorch with CUDA 11.8
+pip install --upgrade torch torchaudio --index-url https://download.pytorch.org/whl/cu118
+
+# Or with CUDA 12.1
+pip install --upgrade torch torchaudio --index-url https://download.pytorch.org/whl/cu121
+```
+
+**To enable speaker diarization:**
+1. See [DIARIZATION_SETUP.md](DIARIZATION_SETUP.md) for complete setup instructions
+2. Get a Hugging Face token: https://huggingface.co/settings/tokens
+3. Accept model license: https://huggingface.co/pyannote/speaker-diarization-3.1
+4. Set environment variable: `export HF_TOKEN="your-token"` (Linux/macOS) or `$env:HF_TOKEN="your-token"` (Windows)
 
 #### 3. Build Whisper Server
 ```bash
