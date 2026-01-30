@@ -3,6 +3,16 @@ Speaker Diarization Service using pyannote.audio
 
 Provides voice-based speaker recognition using pyannote.audio models.
 Supports GPU acceleration with automatic fallback to CPU.
+
+Requires:
+- pyannote.audio >= 4.0.0 (manages torch, torchaudio, torchcodec versions)
+- Hugging Face token with access to the diarization model
+
+Note: This implementation uses torchaudio for audio loading (bypassing torchcodec)
+to avoid FFmpeg dependency issues on Windows. Audio is pre-loaded and passed to
+pyannote.audio as in-memory waveform.
+
+See: https://github.com/pyannote/pyannote-audio/releases/tag/4.0.0
 """
 
 import os
@@ -21,8 +31,9 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-# Default model for diarization
-DEFAULT_DIARIZATION_MODEL = "pyannote/speaker-diarization-3.1"
+# Default model for diarization (pyannote.audio 4.x uses community-1 as the open-source model)
+# See: https://huggingface.co/pyannote/speaker-diarization-community-1
+DEFAULT_DIARIZATION_MODEL = "pyannote/speaker-diarization-community-1"
 DEFAULT_EMBEDDING_MODEL = "pyannote/wespeaker-voxceleb-resnet34-LM"
 
 
@@ -208,7 +219,7 @@ class DiarizationService:
             
             logger.info(f"Loading diarization model: {model_id} on {device}")
             
-            # Load pipeline with token (use 'token' parameter for newer huggingface_hub versions)
+            # Load pipeline with token (pyannote.audio 4.x uses 'token' parameter)
             self._pipeline = Pipeline.from_pretrained(
                 model_id,
                 token=self.hf_token
@@ -258,6 +269,129 @@ class DiarizationService:
                 
             logger.info("Diarization model unloaded")
     
+    def _load_audio_file(self, audio_path: str) -> Tuple[Any, int]:
+        """
+        Load an audio file into a tensor, handling various formats including MP4/AAC.
+        
+        This method tries multiple approaches to load the audio:
+        1. torchaudio (default backend, works for WAV, FLAC, and supported formats)
+        2. FFmpeg subprocess to convert MP4/AAC to WAV, then load with soundfile
+        3. soundfile directly (fallback for WAV/FLAC files)
+        
+        Args:
+            audio_path: Path to the audio file
+            
+        Returns:
+            Tuple of (waveform tensor, sample_rate)
+        """
+        import torch
+        import subprocess
+        import shutil
+        
+        # Try loading with torchaudio first
+        try:
+            import torchaudio
+            logger.debug("Attempting to load audio with torchaudio...")
+            waveform, sample_rate = torchaudio.load(audio_path)
+            logger.debug(f"Successfully loaded with torchaudio: shape={waveform.shape}, sr={sample_rate}")
+            return waveform, sample_rate
+        except Exception as e:
+            logger.debug(f"torchaudio.load() failed: {e}")
+        
+        # If torchaudio fails, try converting with FFmpeg to WAV
+        # This handles MP4/AAC and other formats that torchaudio may not support directly
+        ffmpeg_path = shutil.which("ffmpeg")
+        if ffmpeg_path:
+            logger.debug("Attempting to convert audio with FFmpeg...")
+            try:
+                # Create a temporary WAV file
+                temp_wav = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+                temp_wav_path = temp_wav.name
+                temp_wav.close()
+                
+                try:
+                    # Convert to WAV using FFmpeg, preserving original sample rate
+                    # -y: overwrite output file
+                    # -i: input file
+                    # -vn: no video
+                    # -acodec pcm_s16le: PCM 16-bit little-endian (standard WAV)
+                    # -ac 1: mono (pyannote.audio handles mono better)
+                    cmd = [
+                        ffmpeg_path,
+                        "-y",
+                        "-i", audio_path,
+                        "-vn",
+                        "-acodec", "pcm_s16le",
+                        "-ac", "1",
+                        temp_wav_path
+                    ]
+                    
+                    logger.debug("Running FFmpeg conversion to WAV...")
+                    
+                    # Run FFmpeg with hidden console on Windows
+                    creationflags = 0
+                    if os.name == 'nt':
+                        # CREATE_NO_WINDOW prevents console popup on Windows
+                        creationflags = subprocess.CREATE_NO_WINDOW
+                    
+                    result = subprocess.run(
+                        cmd,
+                        capture_output=True,
+                        text=True,
+                        creationflags=creationflags
+                    )
+                    
+                    if result.returncode != 0:
+                        logger.warning(f"FFmpeg conversion failed: {result.stderr}")
+                    else:
+                        # Load the converted WAV file
+                        import soundfile as sf
+                        audio_data, sample_rate = sf.read(temp_wav_path)
+                        
+                        # Convert to torch tensor with shape (channels, samples)
+                        # soundfile returns (samples,) for mono or (samples, channels) for stereo
+                        if audio_data.ndim == 1:
+                            waveform = torch.from_numpy(audio_data).float().unsqueeze(0)
+                        else:
+                            waveform = torch.from_numpy(audio_data.T).float()
+                        
+                        logger.debug(f"Successfully converted with FFmpeg: shape={waveform.shape}, sr={sample_rate}")
+                        return waveform, sample_rate
+                        
+                finally:
+                    # Clean up temp file
+                    if os.path.exists(temp_wav_path):
+                        os.unlink(temp_wav_path)
+                        
+            except Exception as e:
+                logger.warning(f"FFmpeg conversion failed: {e}")
+        else:
+            logger.debug("FFmpeg not found in PATH")
+        
+        # Try loading with soundfile directly (works for WAV, FLAC, etc.)
+        try:
+            import soundfile as sf
+            logger.debug("Attempting to load audio with soundfile...")
+            audio_data, sample_rate = sf.read(audio_path)
+            
+            # Convert to torch tensor with shape (channels, samples)
+            if audio_data.ndim == 1:
+                waveform = torch.from_numpy(audio_data).float().unsqueeze(0)
+            else:
+                waveform = torch.from_numpy(audio_data.T).float()
+            
+            logger.debug(f"Successfully loaded with soundfile: shape={waveform.shape}, sr={sample_rate}")
+            return waveform, sample_rate
+        except Exception as e:
+            logger.debug(f"soundfile.read() failed: {e}")
+        
+        # All methods failed
+        raise RuntimeError(
+            f"Failed to load audio file: {audio_path}\n"
+            "Ensure FFmpeg is installed and in PATH for MP4/AAC support.\n"
+            "Supported formats: WAV, FLAC (native); MP4/AAC (requires FFmpeg)"
+        )
+    
     async def diarize_audio(
         self,
         audio_path: str,
@@ -268,12 +402,16 @@ class DiarizationService:
         Perform speaker diarization on an audio file.
         
         Args:
-            audio_path: Path to the audio file
+            audio_path: Path to the audio file (supports WAV, FLAC, MP4/AAC with FFmpeg)
             min_speakers: Minimum expected number of speakers
             max_speakers: Maximum expected number of speakers
             
         Returns:
             DiarizationResult with speaker segments
+            
+        Note:
+            Audio is loaded entirely into memory. For very large audio files (>1 hour),
+            this may consume significant memory. MP4/AAC files require FFmpeg in PATH.
         """
         if not self._model_loaded or self._pipeline is None:
             await self.load_model()
@@ -284,6 +422,8 @@ class DiarizationService:
         logger.info(f"Starting diarization for: {audio_path}")
         
         try:
+            import torch
+            
             # Build kwargs for pipeline
             pipeline_kwargs = {}
             if min_speakers is not None:
@@ -291,17 +431,39 @@ class DiarizationService:
             if max_speakers is not None:
                 pipeline_kwargs["max_speakers"] = max_speakers
             
+            # Load audio file - handles various formats including MP4/AAC
+            logger.debug(f"Loading audio file: {audio_path}")
+            waveform, sample_rate = self._load_audio_file(audio_path)
+            
+            # Create audio input dict for pyannote.audio (in-memory waveform format)
+            # pyannote.audio accepts {"waveform": tensor, "sample_rate": int} as input
+            audio_input = {
+                "waveform": waveform,
+                "sample_rate": sample_rate
+            }
+            
+            logger.debug(f"Audio loaded: {waveform.shape}, sample_rate={sample_rate}")
+            
             # Run diarization (CPU-bound, run in thread pool)
             loop = asyncio.get_event_loop()
-            diarization = await loop.run_in_executor(
+            output = await loop.run_in_executor(
                 None,
-                lambda: self._pipeline(audio_path, **pipeline_kwargs)
+                lambda: self._pipeline(audio_input, **pipeline_kwargs)
             )
             
+            # Free waveform memory after pipeline completes
+            del waveform
+            del audio_input
+            
             # Convert pyannote output to our format
+            # pyannote.audio 4.x returns output with .speaker_diarization attribute
+            # which is an Annotation object that can be iterated with itertracks()
             segments = []
             speaker_set = set()
             duration = 0.0
+            
+            # Get the diarization annotation (4.x style: output.speaker_diarization)
+            diarization = getattr(output, 'speaker_diarization', output)
             
             for turn, _, speaker in diarization.itertracks(yield_label=True):
                 segments.append(SpeakerSegment(

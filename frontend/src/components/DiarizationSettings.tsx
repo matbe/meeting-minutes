@@ -229,12 +229,12 @@ export function DiarizationSettings() {
           </a>
           . Accept the model license at{' '}
           <a 
-            href="https://huggingface.co/pyannote/speaker-diarization-3.1" 
+            href="https://huggingface.co/pyannote/speaker-diarization-community-1" 
             target="_blank" 
             rel="noopener noreferrer"
             className="text-blue-600 hover:underline"
           >
-            pyannote/speaker-diarization-3.1
+            pyannote/speaker-diarization-community-1
           </a>
         </p>
 
@@ -326,7 +326,7 @@ export function DiarizationSettings() {
             <div className="flex items-center justify-between">
               <div>
                 <h4 className="font-medium text-gray-900">
-                  {status.model?.name || 'speaker-diarization-3.1'}
+                  {status.model?.name || 'speaker-diarization-community-1'}
                 </h4>
                 <p className="text-sm text-gray-600">
                   {status.model?.description || 'pyannote.audio speaker diarization model'}
