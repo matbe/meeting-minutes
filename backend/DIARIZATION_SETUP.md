@@ -163,11 +163,28 @@ If you see "Pipeline.from_pretrained() got an unexpected keyword argument 'token
 
 If you see "name 'AudioDecoder' is not defined":
 - This indicates torchcodec is not properly installed or FFmpeg dependencies are missing
-- The service automatically falls back to loading audio with torchaudio
+- The service automatically falls back to loading audio with multiple methods
+- **Automatic Fallback Process**:
+  1. First tries torchaudio.load() directly
+  2. If that fails, uses FFmpeg to convert audio to WAV, then loads it
+  3. Supports MP4, MP3, and other formats through FFmpeg conversion
 - **Solution**:
-  1. Ensure FFmpeg is installed on your system
-  2. Reinstall torchcodec: `pip uninstall torchcodec && pip install torchcodec`
-  3. If the issue persists, the fallback to torchaudio will work automatically
+  1. Ensure FFmpeg is installed on your system and in PATH
+  2. Test FFmpeg: Run `ffmpeg -version` in terminal
+  3. Reinstall torchcodec (optional): `pip uninstall torchcodec && pip install torchcodec`
+  4. If FFmpeg is installed, the fallback will work automatically
+
+### Format Not Recognised Error (MP4, MP3, etc.)
+
+If you see "Format not recognised" when processing MP4 or other audio formats:
+- **Automatic Fix**: The service now automatically converts unsupported formats using FFmpeg
+- **Requirements**: FFmpeg must be installed and in your system PATH
+- **Verify FFmpeg**: Run `ffmpeg -version` in terminal/command prompt
+- **Install FFmpeg**:
+  - **Windows**: Download from [ffmpeg.org](https://ffmpeg.org/download.html) and add to PATH
+  - **macOS**: `brew install ffmpeg`
+  - **Linux**: `sudo apt-get install ffmpeg` (Ubuntu/Debian) or `sudo yum install ffmpeg` (CentOS/RHEL)
+- The conversion happens automatically in the background with temporary files
 
 ### Model Download Failures
 

@@ -32,6 +32,33 @@ This document summarizes the fixes applied to address issues found after the ini
 - Automatic fallback to in-memory audio loading when torchcodec fails
 - Audio loading runs in executor to avoid blocking the async event loop
 
+### Issue 3: Format Not Recognised Error (MP4/MP3 Files)
+**Problem:**
+```
+2026-01-30 11:50:31,201 - ERROR - Failed to load audio file: Error opening 'audio.mp4': Format not recognised.
+```
+
+**Root Cause:**
+- After AudioDecoder fallback, torchaudio.load() is used
+- torchaudio.load() on Windows doesn't always properly use FFmpeg backend for MP4/MP3 files
+- Even with FFmpeg in PATH, torchaudio may not detect or use it correctly
+- Results in "Format not recognised" error for common formats like MP4
+
+**Solution:**
+- Enhanced `_load_audio_as_waveform()` with multi-stage fallback:
+  1. **Method 1**: Try torchaudio.load() directly (works for WAV, FLAC, etc.)
+  2. **Method 2**: If Method 1 fails, use FFmpeg subprocess to convert audio to WAV
+     - Converts to 16kHz mono WAV (optimal for speech processing)
+     - Uses temporary file with automatic cleanup
+     - Proper error handling and timeout protection
+  3. Clear error messages if FFmpeg is not found
+
+**Benefits:**
+- Handles MP4, MP3, M4A, and other formats that torchaudio doesn't support directly
+- Leverages system FFmpeg (already required by user)
+- Maintains quality with 16kHz mono output (standard for speech)
+- Graceful degradation with informative error messages
+
 ## Model Comparison
 
 ### Why speaker-diarization-community-1 is Better
@@ -64,7 +91,7 @@ try:
     )
 except NameError as e:
     if "AudioDecoder" in str(e):
-        # Fallback: Load audio as waveform (torchaudio)
+        # Fallback: Load audio as waveform (torchaudio + FFmpeg)
         audio_data = await loop.run_in_executor(
             None,
             self._load_audio_as_waveform,
@@ -74,6 +101,29 @@ except NameError as e:
             None,
             lambda: self._pipeline(audio_data, **pipeline_kwargs)
         )
+```
+
+### Multi-Stage Audio Loading
+
+The `_load_audio_as_waveform()` method now implements a robust fallback strategy:
+
+```python
+def _load_audio_as_waveform(self, audio_path: str) -> Dict[str, Any]:
+    # Method 1: Try torchaudio.load() directly
+    try:
+        waveform, sample_rate = torchaudio.load(audio_path)
+        # ... process and return
+    except Exception:
+        pass  # Fall through to Method 2
+    
+    # Method 2: Convert with FFmpeg, then load
+    try:
+        # Convert to WAV using FFmpeg subprocess
+        ffmpeg -i input.mp4 -ar 16000 -ac 1 output.wav
+        waveform, sample_rate = torchaudio.load(output.wav)
+        # ... cleanup temp file and return
+    except FileNotFoundError:
+        raise RuntimeError("FFmpeg required but not found in PATH")
 ```
 
 ### In-Memory Audio Format
@@ -92,12 +142,25 @@ This format is used as a fallback when torchcodec is unavailable.
 
 1. **backend/app/diarization_service.py**
    - Updated `DEFAULT_DIARIZATION_MODEL` constant
-   - Added `_load_audio_as_waveform()` helper method
+   - Enhanced `_load_audio_as_waveform()` helper method with FFmpeg conversion fallback
    - Modified `diarize_audio()` with AudioDecoder error handling
    - Improved async safety by running audio loading in executor
+   - Added support for MP4, MP3, and other formats via FFmpeg
 
 2. **backend/app/db.py**
    - Updated database table default: `pyannote/speaker-diarization-community-1`
+   - Updated `save_diarization_config()` fallback value
+
+3. **backend/DIARIZATION_SETUP.md**
+   - Updated default model documentation
+   - Enhanced AudioDecoder troubleshooting section
+   - Added "Format Not Recognised Error" troubleshooting section
+   - Updated model license URL
+
+4. **backend/DIARIZATION_FOLLOWUP_FIXES.md** (this file)
+   - Added Issue 3: Format Not Recognised Error
+   - Updated technical implementation details
+   - Added multi-stage audio loading documentation
    - Updated `save_diarization_config()` fallback value
 
 3. **backend/DIARIZATION_SETUP.md**
