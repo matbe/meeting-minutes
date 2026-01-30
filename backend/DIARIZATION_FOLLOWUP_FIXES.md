@@ -119,8 +119,13 @@ def _load_audio_as_waveform(self, audio_path: str) -> Dict[str, Any]:
     # Method 2: Convert with FFmpeg, then load
     try:
         # Convert to WAV using FFmpeg subprocess
-        ffmpeg -i input.mp4 -ar 16000 -ac 1 output.wav
-        waveform, sample_rate = torchaudio.load(output.wav)
+        subprocess.run([
+            'ffmpeg', '-loglevel', 'error',
+            '-i', audio_path,
+            '-ar', '16000', '-ac', '1', '-y',
+            tmp_wav_path
+        ])
+        waveform, sample_rate = torchaudio.load(tmp_wav_path)
         # ... cleanup temp file and return
     except FileNotFoundError:
         raise RuntimeError("FFmpeg required but not found in PATH")
@@ -161,13 +166,6 @@ This format is used as a fallback when torchcodec is unavailable.
    - Added Issue 3: Format Not Recognised Error
    - Updated technical implementation details
    - Added multi-stage audio loading documentation
-   - Updated `save_diarization_config()` fallback value
-
-3. **backend/DIARIZATION_SETUP.md**
-   - Updated default model documentation
-   - Reordered models (community-1 as default, 3.1 as alternative)
-   - Added AudioDecoder troubleshooting section
-   - Updated model license URL
 
 ## Testing Recommendations
 

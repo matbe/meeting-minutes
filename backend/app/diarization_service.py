@@ -8,6 +8,7 @@ Supports GPU acceleration with automatic fallback to CPU.
 import os
 import logging
 import asyncio
+import subprocess
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Any
 from dataclasses import dataclass
@@ -270,7 +271,6 @@ class DiarizationService:
         Tries multiple methods in order:
         1. torchaudio.load() directly
         2. FFmpeg conversion to WAV + torchaudio.load()
-        3. soundfile with FFmpeg (if available)
         
         Args:
             audio_path: Path to audio file
@@ -306,55 +306,47 @@ class DiarizationService:
             logger.warning(f"torchaudio.load() failed: {e}. Trying FFmpeg conversion...")
         
         # Method 2: Convert using FFmpeg to WAV, then load with torchaudio
+        tmp_wav_path = None
         try:
-            import subprocess
-            
             # Create a temporary WAV file
             with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp_file:
                 tmp_wav_path = tmp_file.name
             
-            try:
-                # Use FFmpeg to convert to WAV
-                logger.info(f"Converting {audio_path} to WAV using FFmpeg...")
-                cmd = [
-                    'ffmpeg',
-                    '-i', audio_path,
-                    '-ar', '16000',  # 16kHz sample rate (standard for speech)
-                    '-ac', '1',      # mono
-                    '-y',            # overwrite output
-                    tmp_wav_path
-                ]
-                
-                result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=60
-                )
-                
-                if result.returncode != 0:
-                    raise RuntimeError(f"FFmpeg conversion failed: {result.stderr}")
-                
-                # Load the converted WAV file
-                waveform, sample_rate = torchaudio.load(tmp_wav_path)
-                
-                # Ensure mono audio (should already be mono from FFmpeg, but double-check)
-                if waveform.shape[0] > 1:
-                    waveform = torch.mean(waveform, dim=0, keepdim=True)
-                
-                logger.info(f"Loaded audio via FFmpeg conversion: {waveform.shape}, sample_rate={sample_rate}")
-                
-                return {
-                    "waveform": waveform,
-                    "sample_rate": sample_rate
-                }
-            finally:
-                # Clean up temporary file
-                try:
-                    if os.path.exists(tmp_wav_path):
-                        os.unlink(tmp_wav_path)
-                except Exception as cleanup_error:
-                    logger.warning(f"Failed to clean up temporary file {tmp_wav_path}: {cleanup_error}")
+            # Use FFmpeg to convert to WAV
+            logger.info(f"Converting {audio_path} to WAV using FFmpeg...")
+            cmd = [
+                'ffmpeg',
+                '-loglevel', 'error',  # Only show errors
+                '-i', audio_path,
+                '-ar', '16000',  # 16kHz sample rate (standard for speech)
+                '-ac', '1',      # mono
+                '-y',            # overwrite output
+                tmp_wav_path
+            ]
+            
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=60
+            )
+            
+            if result.returncode != 0:
+                raise RuntimeError(f"FFmpeg conversion failed: {result.stderr}")
+            
+            # Load the converted WAV file
+            waveform, sample_rate = torchaudio.load(tmp_wav_path)
+            
+            # Ensure mono audio (should already be mono from FFmpeg, but double-check)
+            if waveform.shape[0] > 1:
+                waveform = torch.mean(waveform, dim=0, keepdim=True)
+            
+            logger.info(f"Loaded audio via FFmpeg conversion: {waveform.shape}, sample_rate={sample_rate}")
+            
+            return {
+                "waveform": waveform,
+                "sample_rate": sample_rate
+            }
                     
         except FileNotFoundError:
             logger.error("FFmpeg not found in PATH. Please install FFmpeg.")
@@ -365,6 +357,14 @@ class DiarizationService:
         except Exception as e:
             logger.error(f"Failed to load audio file {audio_path} with FFmpeg: {e}")
             raise
+        finally:
+            # Clean up temporary file
+            if tmp_wav_path is not None:
+                try:
+                    if os.path.exists(tmp_wav_path):
+                        os.unlink(tmp_wav_path)
+                except Exception as cleanup_error:
+                    logger.warning(f"Failed to clean up temporary file {tmp_wav_path}: {cleanup_error}")
     
     async def diarize_audio(
         self,
