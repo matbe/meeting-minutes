@@ -3,6 +3,13 @@ Speaker Diarization Service using pyannote.audio
 
 Provides voice-based speaker recognition using pyannote.audio models.
 Supports GPU acceleration with automatic fallback to CPU.
+
+Requires:
+- pyannote.audio >= 4.0.0
+- ffmpeg installed on the system (required by torchcodec for audio I/O)
+- Hugging Face token with access to the diarization model
+
+See: https://github.com/pyannote/pyannote-audio/releases/tag/4.0.0
 """
 
 import os
@@ -21,8 +28,9 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-# Default model for diarization
-DEFAULT_DIARIZATION_MODEL = "pyannote/speaker-diarization-3.1"
+# Default model for diarization (pyannote.audio 4.x uses community-1 as the open-source model)
+# See: https://huggingface.co/pyannote/speaker-diarization-community-1
+DEFAULT_DIARIZATION_MODEL = "pyannote/speaker-diarization-community-1"
 DEFAULT_EMBEDDING_MODEL = "pyannote/wespeaker-voxceleb-resnet34-LM"
 
 
@@ -208,7 +216,7 @@ class DiarizationService:
             
             logger.info(f"Loading diarization model: {model_id} on {device}")
             
-            # Load pipeline with token (use 'token' parameter for newer huggingface_hub versions)
+            # Load pipeline with token (pyannote.audio 4.x uses 'token' parameter)
             self._pipeline = Pipeline.from_pretrained(
                 model_id,
                 token=self.hf_token
@@ -293,15 +301,20 @@ class DiarizationService:
             
             # Run diarization (CPU-bound, run in thread pool)
             loop = asyncio.get_event_loop()
-            diarization = await loop.run_in_executor(
+            output = await loop.run_in_executor(
                 None,
                 lambda: self._pipeline(audio_path, **pipeline_kwargs)
             )
             
             # Convert pyannote output to our format
+            # pyannote.audio 4.x returns output with .speaker_diarization attribute
+            # which is an Annotation object that can be iterated with itertracks()
             segments = []
             speaker_set = set()
             duration = 0.0
+            
+            # Get the diarization annotation (4.x style: output.speaker_diarization)
+            diarization = getattr(output, 'speaker_diarization', output)
             
             for turn, _, speaker in diarization.itertracks(yield_label=True):
                 segments.append(SpeakerSegment(
