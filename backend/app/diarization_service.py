@@ -347,7 +347,12 @@ class DiarizationService:
                     logger.warning(
                         f"torchcodec AudioDecoder not available, loading audio as waveform: {e}"
                     )
-                    audio_data = self._load_audio_as_waveform(audio_path)
+                    # Load audio in executor to avoid blocking event loop
+                    audio_data = await loop.run_in_executor(
+                        None,
+                        self._load_audio_as_waveform,
+                        audio_path
+                    )
                     diarization = await loop.run_in_executor(
                         None,
                         lambda: self._pipeline(audio_data, **pipeline_kwargs)
