@@ -10,12 +10,10 @@ aiosqlite==0.21.0
 ollama==0.5.2
 # Speaker diarization (pyannote.audio)
 # Note: pyannote.audio 4.x requires Python 3.10+ and ffmpeg installed on the system
-# torchcodec is the new audio I/O library used by pyannote.audio 4.x (replaces torchaudio for audio I/O)
+# pyannote.audio pins exact versions of torch, torchaudio, and torchcodec - don't override them
+# FFmpeg shared libraries must be installed on the system (required by torchcodec for audio I/O)
 # See: https://github.com/pyannote/pyannote-audio/releases/tag/4.0.0
 pyannote.audio>=4.0.0
-torch>=2.0.0,<2.6.0
-torchaudio>=2.0.0,<2.6.0
-torchcodec>=0.1.0
 huggingface_hub>=0.20.0
 numpy>=1.21.0
 scipy>=1.10.0

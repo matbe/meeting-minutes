@@ -5,8 +5,11 @@ Provides voice-based speaker recognition using pyannote.audio models.
 Supports GPU acceleration with automatic fallback to CPU.
 
 Requires:
-- pyannote.audio >= 4.0.0
-- ffmpeg installed on the system (required by torchcodec for audio I/O)
+- pyannote.audio >= 4.0.0 (manages torch, torchaudio, torchcodec versions)
+- FFmpeg shared libraries installed on the system (required by torchcodec for audio I/O)
+  - On Windows: Download "shared" FFmpeg build from https://ffmpeg.org/download.html
+  - On macOS: Install via `brew install ffmpeg`
+  - On Linux: Install via package manager (e.g., `apt install ffmpeg`)
 - Hugging Face token with access to the diarization model
 
 See: https://github.com/pyannote/pyannote-audio/releases/tag/4.0.0
