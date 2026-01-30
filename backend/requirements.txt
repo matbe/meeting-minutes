@@ -9,10 +9,13 @@ python-multipart==0.0.20
 aiosqlite==0.21.0
 ollama==0.5.2
 # Speaker diarization (pyannote.audio)
-# Note: pyannote.audio 4.x requires Python 3.10+ and ffmpeg installed on the system
-# pyannote.audio pins exact versions of torch, torchaudio, and torchcodec - don't override them
-# FFmpeg shared libraries must be installed on the system (required by torchcodec for audio I/O)
+# Note: pyannote.audio 4.x requires Python 3.10+
+# pyannote.audio pins exact versions of torch, torchaudio, and torchcodec
 # See: https://github.com/pyannote/pyannote-audio/releases/tag/4.0.0
+#
+# IMPORTANT: For CUDA GPU support, install torch and torchaudio with CUDA BEFORE installing other requirements:
+#   pip install torch==2.8.0+cu129 torchaudio==2.8.0+cu129 --index-url https://download.pytorch.org/whl/cu129
+# Then install the rest: pip install -r requirements.txt
 pyannote.audio>=4.0.0
 huggingface_hub>=0.20.0
 numpy>=1.21.0

@@ -6,11 +6,11 @@ Supports GPU acceleration with automatic fallback to CPU.
 
 Requires:
 - pyannote.audio >= 4.0.0 (manages torch, torchaudio, torchcodec versions)
-- FFmpeg shared libraries installed on the system (required by torchcodec for audio I/O)
-  - On Windows: Download "shared" FFmpeg build from https://ffmpeg.org/download.html
-  - On macOS: Install via `brew install ffmpeg`
-  - On Linux: Install via package manager (e.g., `apt install ffmpeg`)
 - Hugging Face token with access to the diarization model
+
+Note: This implementation uses torchaudio for audio loading (bypassing torchcodec)
+to avoid FFmpeg dependency issues on Windows. Audio is pre-loaded and passed to
+pyannote.audio as in-memory waveform.
 
 See: https://github.com/pyannote/pyannote-audio/releases/tag/4.0.0
 """
@@ -285,6 +285,10 @@ class DiarizationService:
             
         Returns:
             DiarizationResult with speaker segments
+            
+        Note:
+            Audio is loaded entirely into memory using torchaudio. For very large
+            audio files (>1 hour), this may consume significant memory.
         """
         if not self._model_loaded or self._pipeline is None:
             await self.load_model()
@@ -295,6 +299,15 @@ class DiarizationService:
         logger.info(f"Starting diarization for: {audio_path}")
         
         try:
+            # Import torchaudio for audio loading
+            try:
+                import torchaudio
+            except ImportError as e:
+                raise RuntimeError(
+                    "torchaudio is required for audio loading but is not installed. "
+                    "Please install with: pip install torchaudio"
+                ) from e
+            
             # Build kwargs for pipeline
             pipeline_kwargs = {}
             if min_speakers is not None:
@@ -302,12 +315,32 @@ class DiarizationService:
             if max_speakers is not None:
                 pipeline_kwargs["max_speakers"] = max_speakers
             
+            # Load audio using torchaudio (bypasses torchcodec's AudioDecoder which
+            # requires FFmpeg shared libraries that may not be available on Windows)
+            # This loads the audio into memory and passes it as a waveform dictionary
+            # which pyannote.audio supports natively without needing torchcodec.
+            logger.debug(f"Loading audio file with torchaudio: {audio_path}")
+            waveform, sample_rate = torchaudio.load(audio_path)
+            
+            # Create audio input dict for pyannote.audio (in-memory waveform format)
+            # pyannote.audio accepts {"waveform": tensor, "sample_rate": int} as input
+            audio_input = {
+                "waveform": waveform,
+                "sample_rate": sample_rate
+            }
+            
+            logger.debug(f"Audio loaded: {waveform.shape}, sample_rate={sample_rate}")
+            
             # Run diarization (CPU-bound, run in thread pool)
             loop = asyncio.get_event_loop()
             output = await loop.run_in_executor(
                 None,
-                lambda: self._pipeline(audio_path, **pipeline_kwargs)
+                lambda: self._pipeline(audio_input, **pipeline_kwargs)
             )
+            
+            # Free waveform memory after pipeline completes
+            del waveform
+            del audio_input
             
             # Convert pyannote output to our format
             # pyannote.audio 4.x returns output with .speaker_diarization attribute
