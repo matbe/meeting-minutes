@@ -558,7 +558,12 @@ export function useSummaryGeneration({
     };
 
     const fullTranscript = allTranscripts
-      .map(t => `${formatTime(t.audio_start_time, t.timestamp)} ${t.text}`)
+      .map(t => {
+        const timeStr = formatTime(t.audio_start_time, t.timestamp);
+        // Include speaker label in transcript if available (for better summary context)
+        const speakerPrefix = t.speaker_label ? `[${t.speaker_label}]: ` : '';
+        return `${timeStr} ${speakerPrefix}${t.text}`;
+      })
       .join('\n');
 
     await processSummary({ transcriptText: fullTranscript, customPrompt });

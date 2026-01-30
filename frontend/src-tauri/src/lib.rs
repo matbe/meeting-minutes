@@ -700,6 +700,7 @@ pub fn run() {
             audio::speaker_commands::get_speaker_labels,
             audio::speaker_commands::update_speaker_labels,
             audio::speaker_commands::get_speaker_audio_sample,
+            audio::speaker_commands::load_persisted_speaker_labels,
             // Database import commands
             database::commands::check_first_launch,
             database::commands::select_legacy_database_path,

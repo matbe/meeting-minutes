@@ -137,6 +137,47 @@ export default function PageContent({
     Analytics.trackPageView('meeting_details');
   }, []);
 
+  // Load persisted speaker labels when meeting loads
+  useEffect(() => {
+    const loadPersistedSpeakers = async () => {
+      console.log('🎤 [SpeakerLoad] Loading persisted speaker labels for meeting:', meeting.id);
+      
+      try {
+        // Load persisted speaker labels from database
+        const speakerLabels = await invoke<SpeakerLabel[]>('load_persisted_speaker_labels', { 
+          meetingId: meeting.id 
+        });
+        
+        if (speakerLabels.length > 0) {
+          console.log('🎤 [SpeakerLoad] ✅ Found', speakerLabels.length, 'persisted speaker labels');
+          
+          // Build segment -> speaker mapping
+          const newSegmentSpeakerMap: Record<string, { speakerId: string; speakerLabel: string }> = {};
+          speakerLabels.forEach(label => {
+            newSegmentSpeakerMap[label.segmentId] = {
+              speakerId: label.speakerId,
+              speakerLabel: label.speakerLabel,
+            };
+          });
+          setSegmentSpeakerMap(newSegmentSpeakerMap);
+          
+          // Also load speakers for the modal
+          const detectedSpeakers = await invoke<Speaker[]>('get_meeting_speakers', { meetingId: meeting.id });
+          if (detectedSpeakers.length > 0) {
+            setSpeakers(detectedSpeakers);
+          }
+        } else {
+          console.log('🎤 [SpeakerLoad] No persisted speaker labels found');
+        }
+      } catch (err) {
+        console.log('🎤 [SpeakerLoad] Could not load speaker labels:', err);
+        // Not an error - just means no diarization was done yet
+      }
+    };
+
+    loadPersistedSpeakers();
+  }, [meeting.id]);
+
   // Load audio file path for the meeting
   useEffect(() => {
     const loadAudioPath = async () => {
@@ -188,6 +229,9 @@ export default function PageContent({
     console.log('🎤 Full enhance (re-transcribe with diarization) requested');
     setIsEnhancing(true);
     
+    // Show initial toast to indicate processing has started
+    toast.info('Analyzing speakers... This may take a few minutes for long recordings.');
+    
     try {
       // Call diarization API - this returns speaker labels for all segments
       const speakerLabelsResult = await invoke<SpeakerLabel[]>('retranscribe_with_diarization', { meetingId: meeting.id });
@@ -211,7 +255,22 @@ export default function PageContent({
       toast.success(`Speaker detection complete! Found ${detectedSpeakers.length} speakers.`);
     } catch (err) {
       console.error('Failed to retranscribe with diarization:', err);
-      toast.error('Failed to detect speakers. Please try again.');
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      
+      // Show specific error messages for common issues
+      if (errorMessage.includes('Backend server not running') || errorMessage.includes('port 5167')) {
+        toast.error('Backend server not running. Please start the Meetily backend service.');
+      } else if (errorMessage.includes('Hugging Face token') || errorMessage.includes('HF_TOKEN')) {
+        toast.error('Please configure your Hugging Face token in Settings → Speakers.');
+      } else if (errorMessage.includes('model') && errorMessage.includes('load')) {
+        toast.error('Please load the diarization model in Settings → Speakers first.');
+      } else if (errorMessage.includes('pyannote') || errorMessage.includes('dependencies')) {
+        toast.error('Speaker diarization requires pyannote.audio. Please install dependencies.');
+      } else if (errorMessage.includes('AudioMetaData') || errorMessage.includes('torchaudio')) {
+        toast.error('Dependency version mismatch. Please reinstall: pip install torch<2.6 torchaudio<2.6');
+      } else {
+        toast.error(`Speaker detection failed: ${errorMessage}`);
+      }
     } finally {
       setIsEnhancing(false);
     }
@@ -283,17 +342,21 @@ export default function PageContent({
     if (playingSpeakerId === speaker.id) {
       // Stop playback
       setPlayingSpeakerId(null);
+      audioPlayerRef.current?.pause();
       return;
     }
     
     // Get sample audio start time and seek to it
     const sampleStart = speaker.sampleAudioStart ?? 0;
     audioPlayerRef.current?.seekTo(sampleStart);
+    // Start playback
+    audioPlayerRef.current?.play();
     setPlayingSpeakerId(speaker.id);
     
     // Auto-stop after 5 seconds
     speakerSampleTimeoutRef.current = setTimeout(() => {
       setPlayingSpeakerId(null);
+      audioPlayerRef.current?.pause();
       speakerSampleTimeoutRef.current = null;
     }, 5000);
   }, [playingSpeakerId]);
@@ -313,7 +376,7 @@ export default function PageContent({
     
     // Apply speaker labels from diarization results
     return segments.map(segment => {
-      // Check if we have speaker info for this segment from diarization
+      // Check if we have speaker info for this segment from diarization cache
       const speakerInfo = segmentSpeakerMap[segment.id];
       
       if (speakerInfo) {
@@ -324,7 +387,12 @@ export default function PageContent({
         };
       }
       
-      // No diarization result for this segment - keep original (will show "Guest")
+      // Check if segment already has speaker info from database
+      if (segment.speaker_id && segment.speaker_label) {
+        return segment;
+      }
+      
+      // No speaker info - will show "Guest"
       return segment;
     });
   }, [segments, segmentSpeakerMap]);
@@ -388,6 +456,7 @@ export default function PageContent({
           onFullEnhance={handleFullEnhance}
           onQuickLabel={handleQuickLabel}
           onTagClick={handleTagClick}
+          isEnhancing={isEnhancing}
           // Retranscription props
           meetingId={meeting.id}
           meetingFolderPath={meeting.folder_path}

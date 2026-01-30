@@ -156,6 +156,40 @@ class DatabaseManager:
                 )
             """)
 
+            # Create diarization_settings table for speaker recognition configuration
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS diarization_settings (
+                    id TEXT PRIMARY KEY DEFAULT 'default',
+                    hf_token TEXT,
+                    model_id TEXT DEFAULT 'pyannote/speaker-diarization-3.1',
+                    updated_at TEXT NOT NULL
+                )
+            """)
+
+            # Create speaker_labels table for persisting speaker name mappings
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS speaker_labels (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    meeting_id TEXT NOT NULL,
+                    speaker_id TEXT NOT NULL,
+                    speaker_label TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (meeting_id) REFERENCES meetings(id),
+                    UNIQUE(meeting_id, speaker_id)
+                )
+            """)
+
+            # Add speaker columns to transcripts table if not exists
+            try:
+                cursor.execute("ALTER TABLE transcripts ADD COLUMN speaker_id TEXT")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+            try:
+                cursor.execute("ALTER TABLE transcripts ADD COLUMN speaker_label TEXT")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+
             conn.commit()
 
     @asynccontextmanager
@@ -909,5 +943,131 @@ class DatabaseManager:
             logger.error(f"Error updating meeting summary: {str(e)}")
             raise
 
-   
+    # ==================== Diarization Configuration Methods ====================
+
+    async def save_diarization_config(self, hf_token: str = None, model_id: str = None):
+        """Save diarization configuration"""
+        now = datetime.utcnow().isoformat()
+        try:
+            async with self._get_connection() as conn:
+                # Check if config exists
+                cursor = await conn.execute("SELECT id FROM diarization_settings WHERE id = 'default'")
+                existing = await cursor.fetchone()
+                
+                if existing:
+                    # Build update query dynamically based on provided values
+                    updates = ["updated_at = ?"]
+                    values = [now]
+                    
+                    if hf_token is not None:
+                        updates.append("hf_token = ?")
+                        values.append(hf_token)
+                    if model_id is not None:
+                        updates.append("model_id = ?")
+                        values.append(model_id)
+                    
+                    values.append('default')
+                    await conn.execute(
+                        f"UPDATE diarization_settings SET {', '.join(updates)} WHERE id = ?",
+                        values
+                    )
+                else:
+                    await conn.execute(
+                        """INSERT INTO diarization_settings (id, hf_token, model_id, updated_at) 
+                           VALUES (?, ?, ?, ?)""",
+                        ('default', hf_token, model_id or 'pyannote/speaker-diarization-3.1', now)
+                    )
+                
+                await conn.commit()
+                logger.info("Diarization config saved successfully")
+        except Exception as e:
+            logger.error(f"Error saving diarization config: {e}")
+            raise
+
+    async def get_diarization_config(self) -> Optional[Dict]:
+        """Get diarization configuration"""
+        try:
+            async with self._get_connection() as conn:
+                cursor = await conn.execute(
+                    "SELECT hf_token, model_id, updated_at FROM diarization_settings WHERE id = 'default'"
+                )
+                row = await cursor.fetchone()
+                
+                if row:
+                    return {
+                        "hf_token": row[0],
+                        "model_id": row[1],
+                        "updated_at": row[2]
+                    }
+                return None
+        except Exception as e:
+            logger.error(f"Error getting diarization config: {e}")
+            return None
+
+    async def update_speaker_labels(self, meeting_id: str, speaker_mappings: Dict[str, str]):
+        """Update speaker label mappings for a meeting"""
+        now = datetime.utcnow().isoformat()
+        try:
+            async with self._get_connection() as conn:
+                for speaker_id, speaker_label in speaker_mappings.items():
+                    # Upsert speaker label
+                    await conn.execute("""
+                        INSERT INTO speaker_labels (meeting_id, speaker_id, speaker_label, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?)
+                        ON CONFLICT(meeting_id, speaker_id) DO UPDATE SET
+                            speaker_label = excluded.speaker_label,
+                            updated_at = excluded.updated_at
+                    """, (meeting_id, speaker_id, speaker_label, now, now))
+                    
+                    # Also update transcripts table with speaker labels
+                    await conn.execute("""
+                        UPDATE transcripts
+                        SET speaker_label = ?
+                        WHERE meeting_id = ? AND speaker_id = ?
+                    """, (speaker_label, meeting_id, speaker_id))
+                
+                await conn.commit()
+                logger.info(f"Updated speaker labels for meeting {meeting_id}")
+        except Exception as e:
+            logger.error(f"Error updating speaker labels: {e}")
+            raise
+
+    async def get_speaker_labels(self, meeting_id: str) -> Dict[str, str]:
+        """Get speaker label mappings for a meeting"""
+        try:
+            async with self._get_connection() as conn:
+                cursor = await conn.execute(
+                    "SELECT speaker_id, speaker_label FROM speaker_labels WHERE meeting_id = ?",
+                    (meeting_id,)
+                )
+                rows = await cursor.fetchall()
+                return {row[0]: row[1] for row in rows}
+        except Exception as e:
+            logger.error(f"Error getting speaker labels: {e}")
+            return {}
+
+    async def update_transcript_speakers(self, meeting_id: str, transcripts: list):
+        """Update transcript records with speaker IDs from diarization"""
+        now = datetime.utcnow().isoformat()
+        try:
+            async with self._get_connection() as conn:
+                for transcript in transcripts:
+                    if transcript.get("speaker_id"):
+                        await conn.execute("""
+                            UPDATE transcripts
+                            SET speaker_id = ?, speaker_label = ?
+                            WHERE meeting_id = ? AND id = ?
+                        """, (
+                            transcript["speaker_id"],
+                            transcript.get("speaker_label", f"Speaker {transcript['speaker_id'][-1]}"),
+                            meeting_id,
+                            transcript.get("id")
+                        ))
+                
+                await conn.commit()
+                logger.info(f"Updated {len(transcripts)} transcripts with speaker info for meeting {meeting_id}")
+        except Exception as e:
+            logger.error(f"Error updating transcript speakers: {e}")
+            raise
+
 

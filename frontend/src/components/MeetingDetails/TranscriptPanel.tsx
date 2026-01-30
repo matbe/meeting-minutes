@@ -38,6 +38,7 @@ interface TranscriptPanelProps {
   onFullEnhance?: () => void;
   onQuickLabel?: () => void;
   onTagClick?: () => void;
+  isEnhancing?: boolean;
 
   // Retranscription props
   meetingId?: string;
@@ -67,6 +68,7 @@ export function TranscriptPanel({
   onFullEnhance,
   onQuickLabel,
   onTagClick,
+  isEnhancing = false,
   meetingId,
   meetingFolderPath,
 }: TranscriptPanelProps) {
@@ -142,6 +144,7 @@ export function TranscriptPanel({
           onFullEnhance={onFullEnhance}
           onQuickLabel={onQuickLabel}
           onTagClick={onTagClick}
+          isEnhancing={isEnhancing}
         />
       )}
     </div>
