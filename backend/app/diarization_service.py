@@ -269,6 +269,129 @@ class DiarizationService:
                 
             logger.info("Diarization model unloaded")
     
+    def _load_audio_file(self, audio_path: str) -> Tuple[Any, int]:
+        """
+        Load an audio file into a tensor, handling various formats including MP4/AAC.
+        
+        This method tries multiple approaches to load the audio:
+        1. torchaudio (default backend, works for WAV, FLAC, and supported formats)
+        2. FFmpeg subprocess to convert MP4/AAC to WAV, then load with soundfile
+        3. soundfile directly (fallback for WAV/FLAC files)
+        
+        Args:
+            audio_path: Path to the audio file
+            
+        Returns:
+            Tuple of (waveform tensor, sample_rate)
+        """
+        import torch
+        import subprocess
+        import shutil
+        
+        # Try loading with torchaudio first
+        try:
+            import torchaudio
+            logger.debug("Attempting to load audio with torchaudio...")
+            waveform, sample_rate = torchaudio.load(audio_path)
+            logger.debug(f"Successfully loaded with torchaudio: shape={waveform.shape}, sr={sample_rate}")
+            return waveform, sample_rate
+        except Exception as e:
+            logger.debug(f"torchaudio.load() failed: {e}")
+        
+        # If torchaudio fails, try converting with FFmpeg to WAV
+        # This handles MP4/AAC and other formats that torchaudio may not support directly
+        ffmpeg_path = shutil.which("ffmpeg")
+        if ffmpeg_path:
+            logger.debug("Attempting to convert audio with FFmpeg...")
+            try:
+                # Create a temporary WAV file
+                temp_wav = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+                temp_wav_path = temp_wav.name
+                temp_wav.close()
+                
+                try:
+                    # Convert to WAV using FFmpeg, preserving original sample rate
+                    # -y: overwrite output file
+                    # -i: input file
+                    # -vn: no video
+                    # -acodec pcm_s16le: PCM 16-bit little-endian (standard WAV)
+                    # -ac 1: mono (pyannote.audio handles mono better)
+                    cmd = [
+                        ffmpeg_path,
+                        "-y",
+                        "-i", audio_path,
+                        "-vn",
+                        "-acodec", "pcm_s16le",
+                        "-ac", "1",
+                        temp_wav_path
+                    ]
+                    
+                    logger.debug("Running FFmpeg conversion to WAV...")
+                    
+                    # Run FFmpeg with hidden console on Windows
+                    creationflags = 0
+                    if os.name == 'nt':
+                        # CREATE_NO_WINDOW prevents console popup on Windows
+                        creationflags = subprocess.CREATE_NO_WINDOW
+                    
+                    result = subprocess.run(
+                        cmd,
+                        capture_output=True,
+                        text=True,
+                        creationflags=creationflags
+                    )
+                    
+                    if result.returncode != 0:
+                        logger.warning(f"FFmpeg conversion failed: {result.stderr}")
+                    else:
+                        # Load the converted WAV file
+                        import soundfile as sf
+                        audio_data, sample_rate = sf.read(temp_wav_path)
+                        
+                        # Convert to torch tensor with shape (channels, samples)
+                        # soundfile returns (samples,) for mono or (samples, channels) for stereo
+                        if audio_data.ndim == 1:
+                            waveform = torch.from_numpy(audio_data).float().unsqueeze(0)
+                        else:
+                            waveform = torch.from_numpy(audio_data.T).float()
+                        
+                        logger.debug(f"Successfully converted with FFmpeg: shape={waveform.shape}, sr={sample_rate}")
+                        return waveform, sample_rate
+                        
+                finally:
+                    # Clean up temp file
+                    if os.path.exists(temp_wav_path):
+                        os.unlink(temp_wav_path)
+                        
+            except Exception as e:
+                logger.warning(f"FFmpeg conversion failed: {e}")
+        else:
+            logger.debug("FFmpeg not found in PATH")
+        
+        # Try loading with soundfile directly (works for WAV, FLAC, etc.)
+        try:
+            import soundfile as sf
+            logger.debug("Attempting to load audio with soundfile...")
+            audio_data, sample_rate = sf.read(audio_path)
+            
+            # Convert to torch tensor with shape (channels, samples)
+            if audio_data.ndim == 1:
+                waveform = torch.from_numpy(audio_data).float().unsqueeze(0)
+            else:
+                waveform = torch.from_numpy(audio_data.T).float()
+            
+            logger.debug(f"Successfully loaded with soundfile: shape={waveform.shape}, sr={sample_rate}")
+            return waveform, sample_rate
+        except Exception as e:
+            logger.debug(f"soundfile.read() failed: {e}")
+        
+        # All methods failed
+        raise RuntimeError(
+            f"Failed to load audio file: {audio_path}\n"
+            "Ensure FFmpeg is installed and in PATH for MP4/AAC support.\n"
+            "Supported formats: WAV, FLAC (native); MP4/AAC (requires FFmpeg)"
+        )
+    
     async def diarize_audio(
         self,
         audio_path: str,
@@ -279,7 +402,7 @@ class DiarizationService:
         Perform speaker diarization on an audio file.
         
         Args:
-            audio_path: Path to the audio file
+            audio_path: Path to the audio file (supports WAV, FLAC, MP4/AAC with FFmpeg)
             min_speakers: Minimum expected number of speakers
             max_speakers: Maximum expected number of speakers
             
@@ -287,8 +410,8 @@ class DiarizationService:
             DiarizationResult with speaker segments
             
         Note:
-            Audio is loaded entirely into memory using torchaudio. For very large
-            audio files (>1 hour), this may consume significant memory.
+            Audio is loaded entirely into memory. For very large audio files (>1 hour),
+            this may consume significant memory. MP4/AAC files require FFmpeg in PATH.
         """
         if not self._model_loaded or self._pipeline is None:
             await self.load_model()
@@ -299,14 +422,7 @@ class DiarizationService:
         logger.info(f"Starting diarization for: {audio_path}")
         
         try:
-            # Import torchaudio for audio loading
-            try:
-                import torchaudio
-            except ImportError as e:
-                raise RuntimeError(
-                    "torchaudio is required for audio loading but is not installed. "
-                    "Please install with: pip install torchaudio"
-                ) from e
+            import torch
             
             # Build kwargs for pipeline
             pipeline_kwargs = {}
@@ -315,12 +431,9 @@ class DiarizationService:
             if max_speakers is not None:
                 pipeline_kwargs["max_speakers"] = max_speakers
             
-            # Load audio using torchaudio (bypasses torchcodec's AudioDecoder which
-            # requires FFmpeg shared libraries that may not be available on Windows)
-            # This loads the audio into memory and passes it as a waveform dictionary
-            # which pyannote.audio supports natively without needing torchcodec.
-            logger.debug(f"Loading audio file with torchaudio: {audio_path}")
-            waveform, sample_rate = torchaudio.load(audio_path)
+            # Load audio file - handles various formats including MP4/AAC
+            logger.debug(f"Loading audio file: {audio_path}")
+            waveform, sample_rate = self._load_audio_file(audio_path)
             
             # Create audio input dict for pyannote.audio (in-memory waveform format)
             # pyannote.audio accepts {"waveform": tensor, "sample_rate": int} as input
