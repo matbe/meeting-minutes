@@ -22,6 +22,7 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 # Default model for diarization
+# pyannote.audio 4.x supports speaker-diarization-3.1 and the newer community models
 DEFAULT_DIARIZATION_MODEL = "pyannote/speaker-diarization-3.1"
 DEFAULT_EMBEDDING_MODEL = "pyannote/wespeaker-voxceleb-resnet34-LM"
 
