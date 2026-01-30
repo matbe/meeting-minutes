@@ -10,9 +10,10 @@ aiosqlite==0.21.0
 ollama==0.5.2
 # Speaker diarization (pyannote.audio)
 # Note: pyannote.audio 3.3.2 requires specific torch/torchaudio versions
+# and huggingface_hub < 0.24.0 (use_auth_token parameter deprecated in newer versions)
 pyannote.audio==3.3.2
 torch>=2.0.0,<2.6.0
 torchaudio>=2.0.0,<2.6.0
-huggingface_hub>=0.20.0
+huggingface_hub>=0.20.0,<0.24.0
 scipy>=1.10.0
 soundfile>=0.12.0
