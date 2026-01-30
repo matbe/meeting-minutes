@@ -92,15 +92,16 @@ echo "HF_TOKEN=your-token-here" >> .env
 ## Model Information
 
 ### Default Model
-- **Model ID**: `pyannote/speaker-diarization-3.1`
+- **Model ID**: `pyannote/speaker-diarization-community-1`
 - **Version**: Compatible with pyannote.audio 4.x
 - **Size**: ~500 MB
-- **Use Case**: General-purpose speaker diarization
+- **Features**: VBx clustering, exclusive diarization, improved speaker assignment
+- **Use Case**: Best accuracy for pyannote.audio 4.x with better transcription alignment
 
 ### Alternative Models
 
-For better accuracy, you can use:
-- `pyannote/speaker-diarization-community-1` (community model with VBx clustering)
+For legacy compatibility or testing:
+- `pyannote/speaker-diarization-3.1` (older model with hierarchical clustering)
 
 To change the model, update the `DEFAULT_DIARIZATION_MODEL` in `app/diarization_service.py` or configure it via the API.
 
@@ -158,15 +159,26 @@ If you see "Pipeline.from_pretrained() got an unexpected keyword argument 'token
 - This means pyannote.audio version is outdated (< 4.0)
 - Ensure you've installed pyannote.audio 4.0.3: `pip install pyannote.audio==4.0.3`
 
+### AudioDecoder Not Defined Error
+
+If you see "name 'AudioDecoder' is not defined":
+- This indicates torchcodec is not properly installed or FFmpeg dependencies are missing
+- The service automatically falls back to loading audio with torchaudio
+- **Solution**:
+  1. Ensure FFmpeg is installed on your system
+  2. Reinstall torchcodec: `pip uninstall torchcodec && pip install torchcodec`
+  3. If the issue persists, the fallback to torchaudio will work automatically
+
 ### Model Download Failures
 
 If models fail to download:
 1. Check your internet connection
 2. Verify your HF_TOKEN is valid and has accepted the model license
-3. Manually cache the model:
+3. Accept the new model license at: https://huggingface.co/pyannote/speaker-diarization-community-1
+4. Manually cache the model:
    ```python
    from pyannote.audio import Pipeline
-   pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization-3.1", token="YOUR_TOKEN")
+   pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization-community-1", token="YOUR_TOKEN")
    ```
 
 ## API Usage

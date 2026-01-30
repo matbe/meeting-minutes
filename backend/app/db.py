@@ -161,7 +161,7 @@ class DatabaseManager:
                 CREATE TABLE IF NOT EXISTS diarization_settings (
                     id TEXT PRIMARY KEY DEFAULT 'default',
                     hf_token TEXT,
-                    model_id TEXT DEFAULT 'pyannote/speaker-diarization-3.1',
+                    model_id TEXT DEFAULT 'pyannote/speaker-diarization-community-1',
                     updated_at TEXT NOT NULL
                 )
             """)
@@ -975,7 +975,7 @@ class DatabaseManager:
                     await conn.execute(
                         """INSERT INTO diarization_settings (id, hf_token, model_id, updated_at) 
                            VALUES (?, ?, ?, ?)""",
-                        ('default', hf_token, model_id or 'pyannote/speaker-diarization-3.1', now)
+                        ('default', hf_token, model_id or 'pyannote/speaker-diarization-community-1', now)
                     )
                 
                 await conn.commit()

@@ -22,8 +22,9 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 # Default model for diarization
-# pyannote.audio 4.x supports speaker-diarization-3.1 and the newer community models
-DEFAULT_DIARIZATION_MODEL = "pyannote/speaker-diarization-3.1"
+# pyannote.audio 4.x - using community model with VBx clustering for better accuracy
+# speaker-diarization-community-1 provides improved speaker assignment and exclusive diarization
+DEFAULT_DIARIZATION_MODEL = "pyannote/speaker-diarization-community-1"
 DEFAULT_EMBEDDING_MODEL = "pyannote/wespeaker-voxceleb-resnet34-LM"
 
 
@@ -259,6 +260,45 @@ class DiarizationService:
                 
             logger.info("Diarization model unloaded")
     
+    def _load_audio_as_waveform(self, audio_path: str) -> Dict[str, Any]:
+        """
+        Load audio file as waveform for in-memory processing.
+        
+        This is a fallback when torchcodec fails to load audio directly.
+        pyannote.audio 4.x supports in-memory audio as {"waveform": tensor, "sample_rate": int}.
+        
+        Args:
+            audio_path: Path to audio file
+            
+        Returns:
+            Dict with waveform and sample_rate
+        """
+        try:
+            import torchaudio
+            import torch
+            
+            waveform, sample_rate = torchaudio.load(audio_path)
+            
+            # Ensure mono audio (required by pyannote)
+            if waveform.shape[0] > 1:
+                waveform = torch.mean(waveform, dim=0, keepdim=True)
+            
+            logger.info(f"Loaded audio as waveform: {waveform.shape}, sample_rate={sample_rate}")
+            
+            return {
+                "waveform": waveform,
+                "sample_rate": sample_rate
+            }
+        except ImportError:
+            logger.error("torchaudio not available for audio loading")
+            raise RuntimeError(
+                "Failed to load audio. Please ensure torchaudio is installed: "
+                "pip install torchaudio"
+            )
+        except Exception as e:
+            logger.error(f"Failed to load audio file {audio_path}: {e}")
+            raise
+    
     async def diarize_audio(
         self,
         audio_path: str,
@@ -294,10 +334,26 @@ class DiarizationService:
             
             # Run diarization (CPU-bound, run in thread pool)
             loop = asyncio.get_event_loop()
-            diarization = await loop.run_in_executor(
-                None,
-                lambda: self._pipeline(audio_path, **pipeline_kwargs)
-            )
+            
+            # Try direct file path first (torchcodec should handle it)
+            try:
+                diarization = await loop.run_in_executor(
+                    None,
+                    lambda: self._pipeline(audio_path, **pipeline_kwargs)
+                )
+            except NameError as e:
+                if "AudioDecoder" in str(e):
+                    # Fallback: Load audio as waveform if torchcodec fails
+                    logger.warning(
+                        f"torchcodec AudioDecoder not available, loading audio as waveform: {e}"
+                    )
+                    audio_data = self._load_audio_as_waveform(audio_path)
+                    diarization = await loop.run_in_executor(
+                        None,
+                        lambda: self._pipeline(audio_data, **pipeline_kwargs)
+                    )
+                else:
+                    raise
             
             # Convert pyannote output to our format
             segments = []
