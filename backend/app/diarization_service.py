@@ -208,10 +208,10 @@ class DiarizationService:
             
             logger.info(f"Loading diarization model: {model_id} on {device}")
             
-            # Load pipeline with token
+            # Load pipeline with token (use 'token' parameter for newer huggingface_hub versions)
             self._pipeline = Pipeline.from_pretrained(
                 model_id,
-                use_auth_token=self.hf_token
+                token=self.hf_token
             )
             
             # Move to appropriate device
