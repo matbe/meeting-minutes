@@ -186,7 +186,7 @@ Native deployment offers optimal performance by running directly on the host sys
 #### macOS
 - Xcode Command Line Tools: `xcode-select --install`
 - Homebrew: `/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"`
-- Python 3.10+: `brew install python3` - **Required for speaker diarization feature**
+- Python 3.10+: `brew install python@3.10` - **Required for speaker diarization feature**
 - Dependencies: `brew install cmake llvm libomp`
 
 ### Windows Setup
@@ -250,7 +250,7 @@ cd backend
 For optimal performance, build locally after installing dependencies:
 
 **🔧 Required Dependencies (Install First):**
-- **Python 3.9+** with pip (add to PATH)
+- **Python 3.10+** with pip (add to PATH) - **Required for speaker diarization**
 - **Visual Studio Build Tools** (C++ workload)
 - **CMake** (add to PATH)
 - **Git** (with submodules support)
