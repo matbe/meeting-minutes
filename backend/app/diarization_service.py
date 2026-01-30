@@ -8,6 +8,7 @@ Supports GPU acceleration with automatic fallback to CPU.
 import os
 import logging
 import asyncio
+import subprocess
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Any
 from dataclasses import dataclass
@@ -22,7 +23,9 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 # Default model for diarization
-DEFAULT_DIARIZATION_MODEL = "pyannote/speaker-diarization-3.1"
+# pyannote.audio 4.x - using community model with VBx clustering for better accuracy
+# speaker-diarization-community-1 provides improved speaker assignment and exclusive diarization
+DEFAULT_DIARIZATION_MODEL = "pyannote/speaker-diarization-community-1"
 DEFAULT_EMBEDDING_MODEL = "pyannote/wespeaker-voxceleb-resnet34-LM"
 
 
@@ -258,6 +261,111 @@ class DiarizationService:
                 
             logger.info("Diarization model unloaded")
     
+    def _load_audio_as_waveform(self, audio_path: str) -> Dict[str, Any]:
+        """
+        Load audio file as waveform for in-memory processing.
+        
+        This is a fallback when torchcodec fails to load audio directly.
+        pyannote.audio 4.x supports in-memory audio as {"waveform": tensor, "sample_rate": int}.
+        
+        Tries multiple methods in order:
+        1. torchaudio.load() directly
+        2. FFmpeg conversion to WAV + torchaudio.load()
+        
+        Args:
+            audio_path: Path to audio file
+            
+        Returns:
+            Dict with waveform and sample_rate
+        """
+        try:
+            import torchaudio
+            import torch
+        except ImportError:
+            logger.error("torchaudio not available for audio loading")
+            raise RuntimeError(
+                "Failed to load audio. Please ensure torchaudio is installed: "
+                "pip install torchaudio"
+            )
+        
+        # Method 1: Try torchaudio.load() directly
+        try:
+            waveform, sample_rate = torchaudio.load(audio_path)
+            
+            # Ensure mono audio (required by pyannote)
+            if waveform.shape[0] > 1:
+                waveform = torch.mean(waveform, dim=0, keepdim=True)
+            
+            logger.info(f"Loaded audio as waveform: {waveform.shape}, sample_rate={sample_rate}")
+            
+            return {
+                "waveform": waveform,
+                "sample_rate": sample_rate
+            }
+        except Exception as e:
+            logger.warning(f"torchaudio.load() failed: {e}. Trying FFmpeg conversion...")
+        
+        # Method 2: Convert using FFmpeg to WAV, then load with torchaudio
+        tmp_wav_path = None
+        try:
+            # Create a temporary WAV file
+            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp_file:
+                tmp_wav_path = tmp_file.name
+            
+            # Use FFmpeg to convert to WAV
+            logger.info(f"Converting {audio_path} to WAV using FFmpeg...")
+            cmd = [
+                'ffmpeg',
+                '-loglevel', 'error',  # Only show errors
+                '-i', audio_path,
+                '-ar', '16000',  # 16kHz sample rate (standard for speech)
+                '-ac', '1',      # mono
+                '-y',            # overwrite output
+                tmp_wav_path
+            ]
+            
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=60
+            )
+            
+            if result.returncode != 0:
+                raise RuntimeError(f"FFmpeg conversion failed: {result.stderr}")
+            
+            # Load the converted WAV file
+            waveform, sample_rate = torchaudio.load(tmp_wav_path)
+            
+            # Ensure mono audio (should already be mono from FFmpeg, but double-check)
+            if waveform.shape[0] > 1:
+                waveform = torch.mean(waveform, dim=0, keepdim=True)
+            
+            logger.info(f"Loaded audio via FFmpeg conversion: {waveform.shape}, sample_rate={sample_rate}")
+            
+            return {
+                "waveform": waveform,
+                "sample_rate": sample_rate
+            }
+                    
+        except FileNotFoundError:
+            logger.error("FFmpeg not found in PATH. Please install FFmpeg.")
+            raise RuntimeError(
+                "Failed to load audio. FFmpeg is required for MP4 and other formats. "
+                "Please install FFmpeg: https://ffmpeg.org/download.html"
+            )
+        except Exception as e:
+            logger.error(f"Failed to load audio file {audio_path} with FFmpeg: {e}")
+            raise
+        finally:
+            # Clean up temporary file
+            if tmp_wav_path is not None:
+                try:
+                    if os.path.exists(tmp_wav_path):
+                        os.unlink(tmp_wav_path)
+                except Exception as cleanup_error:
+                    logger.warning(f"Failed to clean up temporary file {tmp_wav_path}: {cleanup_error}")
+    
     async def diarize_audio(
         self,
         audio_path: str,
@@ -293,10 +401,31 @@ class DiarizationService:
             
             # Run diarization (CPU-bound, run in thread pool)
             loop = asyncio.get_event_loop()
-            diarization = await loop.run_in_executor(
-                None,
-                lambda: self._pipeline(audio_path, **pipeline_kwargs)
-            )
+            
+            # Try direct file path first (torchcodec should handle it)
+            try:
+                diarization = await loop.run_in_executor(
+                    None,
+                    lambda: self._pipeline(audio_path, **pipeline_kwargs)
+                )
+            except NameError as e:
+                if "AudioDecoder" in str(e):
+                    # Fallback: Load audio as waveform if torchcodec fails
+                    logger.warning(
+                        f"torchcodec AudioDecoder not available, loading audio as waveform: {e}"
+                    )
+                    # Load audio in executor to avoid blocking event loop
+                    audio_data = await loop.run_in_executor(
+                        None,
+                        self._load_audio_as_waveform,
+                        audio_path
+                    )
+                    diarization = await loop.run_in_executor(
+                        None,
+                        lambda: self._pipeline(audio_data, **pipeline_kwargs)
+                    )
+                else:
+                    raise
             
             # Convert pyannote output to our format
             segments = []
