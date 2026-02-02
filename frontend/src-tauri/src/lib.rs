@@ -46,6 +46,7 @@ pub mod onboarding;
 pub mod openrouter;
 pub mod parakeet_engine;
 pub mod state;
+pub mod storage_preferences;
 pub mod summary;
 pub mod tray;
 pub mod utils;
