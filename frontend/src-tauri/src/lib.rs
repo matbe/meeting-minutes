@@ -630,6 +630,9 @@ pub fn run() {
             api::test_backend_connection,
             api::debug_backend_connection,
             api::open_external_url,
+            api::get_meeting_audio_path,
+            api::get_meeting_audio_data,
+            api::api_delete_api_key,
             // Custom OpenAI commands
             api::api_save_custom_openai_config,
             api::api_get_custom_openai_config,
@@ -718,6 +721,17 @@ pub fn run() {
             database::vocabulary_commands::get_vocabulary_for_correction,
             database::vocabulary_commands::import_vocabulary,
             database::vocabulary_commands::export_vocabulary,
+            // Retranscription commands
+            audio::retranscription::start_retranscription_command,
+            audio::retranscription::cancel_retranscription_command,
+            audio::retranscription::is_retranscription_in_progress_command,
+            // Speaker diarization commands
+            audio::speaker_commands::retranscribe_with_diarization,
+            audio::speaker_commands::get_meeting_speakers,
+            audio::speaker_commands::get_speaker_labels,
+            audio::speaker_commands::update_speaker_labels,
+            audio::speaker_commands::get_speaker_audio_sample,
+            audio::speaker_commands::load_persisted_speaker_labels,
             // Onboarding commands
             onboarding::get_onboarding_status,
             onboarding::save_onboarding_status_cmd,

@@ -8,8 +8,10 @@ import { ConfidenceIndicator } from "./ConfidenceIndicator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { RecordingStatusBar } from "./RecordingStatusBar";
 import { motion, AnimatePresence } from "framer-motion";
-import { TranscriptSegmentData } from "@/types";
+import { TranscriptSegmentData, VocabularyEntry } from "@/types";
 import { getSpeakerColor } from "./SpeakerTagModal";
+import { invoke } from '@tauri-apps/api/core';
+import { correctTranscript } from '@/lib/vocabularyCorrection';
 
 export interface VirtualizedTranscriptViewProps {
     /** Transcript segments to display */
@@ -83,6 +85,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
     isActive,
     speakerId,
     speakerLabel,
+    vocabularyCorrection,
 }: {
     id: string;
     timestamp: number;
@@ -95,8 +98,11 @@ const TranscriptSegment = memo(function TranscriptSegment({
     isActive?: boolean;
     speakerId?: string;
     speakerLabel?: string;
+    vocabularyCorrection?: (text: string) => string;
 }) {
-    const displayText = cleanStopWords(text) || (text.trim() === '' ? '[Silence]' : text);
+    // Apply vocabulary correction first, then clean stop words
+    const correctedText = vocabularyCorrection ? vocabularyCorrection(text) : text;
+    const displayText = cleanStopWords(correctedText) || (text.trim() === '' ? '[Silence]' : correctedText);
     // Default speaker ID for "Guest" when no speaker is identified
     const effectiveSpeakerId = speakerId ?? 'guest';
     const effectiveSpeakerLabel = speakerLabel ?? 'Guest';
@@ -207,6 +213,33 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
         isRecording,
         enableStreaming
     );
+
+    // Vocabulary correction state
+    const [vocabulary, setVocabulary] = useState<VocabularyEntry[]>([]);
+    const vocabularyLoadedRef = useRef(false);
+
+    // Load vocabulary for correction
+    useEffect(() => {
+        if (vocabularyLoadedRef.current) return;
+        
+        const loadVocabulary = async () => {
+            try {
+                const entries = await invoke<VocabularyEntry[]>('get_vocabulary_for_correction');
+                setVocabulary(entries);
+                vocabularyLoadedRef.current = true;
+            } catch (err) {
+                console.error('Failed to load vocabulary for correction:', err);
+            }
+        };
+        
+        loadVocabulary();
+    }, []);
+
+    // Apply vocabulary correction to text
+    const applyVocabularyCorrection = useCallback((text: string): string => {
+        if (vocabulary.length === 0) return text;
+        return correctTranscript(text, vocabulary);
+    }, [vocabulary]);
 
     // Infinite scroll: IntersectionObserver to trigger loading more
     useEffect(() => {
@@ -363,6 +396,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         isActive={isSegmentActive(segment, virtualRow.index)}
                                         speakerId={segment.speaker_id}
                                         speakerLabel={segment.speaker_label}
+                                        vocabularyCorrection={applyVocabularyCorrection}
                                     />
                                 </div>
                             );
@@ -424,6 +458,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         isActive={isSegmentActive(segment, index)}
                                         speakerId={segment.speaker_id}
                                         speakerLabel={segment.speaker_label}
+                                        vocabularyCorrection={applyVocabularyCorrection}
                                     />
                                 </motion.div>
                             );
