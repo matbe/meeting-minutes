@@ -376,6 +376,21 @@ export function VocabularySettings({ onClose }: VocabularySettingsProps) {
           <li>• Vocabulary is automatically applied to correct transcriptions</li>
           <li>• Import/export vocabulary sets as CSV for easy sharing</li>
         </ul>
+        
+        <h5 className="font-medium text-blue-900 mt-4 mb-2">CSV File Format</h5>
+        <div className="text-sm text-blue-800 space-y-1">
+          <p className="mb-2">The CSV file uses the following columns:</p>
+          <ul className="space-y-1 ml-4">
+            <li><strong>term</strong> - The correct spelling of the word (e.g., "Kubernetes")</li>
+            <li><strong>alternatives</strong> - Common misrecognitions separated by semicolons (e.g., "Cooper Netties;Kuber Netties")</li>
+            <li><strong>category</strong> - Optional category for organization (e.g., "Technology", "Product", "Person")</li>
+          </ul>
+          <p className="mt-2 font-mono text-xs bg-blue-100 p-2 rounded">
+            term,alternatives,category<br/>
+            "Kubernetes","Cooper Netties;Kuber Netties","Technology"<br/>
+            "OAuth","Oh Auth;O Auth","Acronym"
+          </p>
+        </div>
       </div>
 
       {/* Delete confirmation modal */}

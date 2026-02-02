@@ -273,12 +273,12 @@ export function VocabularyEditor({ vocabularySet, onBack }: VocabularyEditorProp
               <Label htmlFor="category" className="text-sm font-medium text-gray-700">
                 Category
               </Label>
-              <Select value={formCategory} onValueChange={setFormCategory}>
+              <Select value={formCategory || '_none_'} onValueChange={(val) => setFormCategory(val === '_none_' ? '' : val)}>
                 <SelectTrigger className="mt-1">
                   <SelectValue placeholder="Select category..." />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">None</SelectItem>
+                  <SelectItem value="_none_">None</SelectItem>
                   {VOCABULARY_CATEGORIES.map((cat) => (
                     <SelectItem key={cat} value={cat}>
                       {cat}
