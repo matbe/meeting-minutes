@@ -177,7 +177,7 @@ impl WhisperEngine {
             ("small", "ggml-small.bin", 466, "Good", "Medium", "Better accuracy, moderate speed"),
             ("medium", "ggml-medium.bin", 1420, "High", "Slow", "High accuracy for professional use"),
             ("large-v3-turbo", "ggml-large-v3-turbo.bin", 809, "High", "Medium", "Best accuracy with improved speed"),
-            ("large-v3", "ggml-large-v3.bin", 2870, "High", "Slow", "Best accuracy, latest large model"),
+            ("large-v3", "ggml-large-v3.bin", 3174, "High", "Slow", "Best accuracy, latest large model"),
 
             // Q5_0 quantized models (balanced speed/accuracy)
             ("tiny-q5_0", "ggml-tiny-q5_0.bin", 26, "Decent", "Very Fast", "Quantized tiny model, ~50% faster processing"),
@@ -191,9 +191,8 @@ impl WhisperEngine {
             ("tiny-q8_0", "ggml-tiny-q8_0.bin", 42, "Decent", "Very Fast", "Higher quality quantized tiny model"),
             ("base-q8_0", "ggml-base-q8_0.bin", 148, "Good", "Fast", "Higher quality quantized base model"),
             ("small-q8_0", "ggml-small-q8_0.bin", 488, "Good", "Medium", "Higher quality quantized small model"),
-            ("medium-q8_0", "ggml-medium-q8_0.bin", 1485, "High", "Slow", "Higher quality quantized medium model"),
+            ("medium-q8_0", "ggml-medium-q8_0.bin", 823, "High", "Slow", "Higher quality quantized medium model"),
             ("large-v3-turbo-q8_0", "ggml-large-v3-turbo-q8_0.bin", 843, "High", "Medium", "Higher quality quantized turbo model"),
-            ("large-v3-q8_0", "ggml-large-v3-q8_0.bin", 2997, "High", "Slow", "Higher quality quantized large model"),
 
            ];
         
@@ -976,7 +975,6 @@ impl WhisperEngine {
             "small-q8_0" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q8_0.bin",
             "medium-q8_0" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium-q8_0.bin",
             "large-v3-turbo-q8_0" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q8_0.bin",
-            "large-v3-q8_0" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-q8_0.bin",
             
             _ => return Err(anyhow!("Unsupported model: {}", model_name))
         };

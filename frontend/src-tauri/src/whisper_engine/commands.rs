@@ -88,7 +88,7 @@ fn discover_models_standalone() -> Result<Vec<ModelInfo>, String> {
         ("small", "ggml-small.bin", 466, "Good", "Medium", "Better accuracy"),
         ("medium", "ggml-medium.bin", 1420, "High", "Slow", "High accuracy"),
         ("large-v3-turbo", "ggml-large-v3-turbo.bin", 809, "High", "Medium", "Best accuracy with speed"),
-        ("large-v3", "ggml-large-v3.bin", 2870, "High", "Slow", "Best accuracy"),
+        ("large-v3", "ggml-large-v3.bin", 3174, "High", "Slow", "Best accuracy"),
         ("tiny-q5_0", "ggml-tiny-q5_0.bin", 26, "Decent", "Very Fast", "Quantized tiny"),
         ("base-q5_0", "ggml-base-q5_0.bin", 85, "Good", "Fast", "Quantized base"),
         ("small-q5_0", "ggml-small-q5_0.bin", 280, "Good", "Fast", "Quantized small"),
