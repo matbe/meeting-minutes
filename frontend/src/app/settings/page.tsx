@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
-import { ArrowLeft, Settings2, Mic, Database as DatabaseIcon, SparkleIcon, Book } from 'lucide-react';
+import { ArrowLeft, Settings2, Mic, Database as DatabaseIcon, SparkleIcon, Book, Users } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { invoke } from '@tauri-apps/api/core';
 import { motion } from 'framer-motion';
@@ -10,6 +10,7 @@ import { RecordingSettings } from '@/components/RecordingSettings';
 import { PreferenceSettings } from '@/components/PreferenceSettings';
 import { SummaryModelSettings } from '@/components/SummaryModelSettings';
 import { VocabularySettings } from '@/components/VocabularySettings';
+import { DiarizationSettings } from '@/components/DiarizationSettings';
 import { useConfig } from '@/contexts/ConfigContext';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 
@@ -19,6 +20,7 @@ const TABS = [
   { value: 'recording', label: 'Recordings', icon: Mic },
   { value: 'Transcriptionmodels', label: 'Transcription', icon: DatabaseIcon },
   { value: 'vocabulary', label: 'Vocabulary', icon: Book },
+  { value: 'speakers', label: 'Speakers', icon: Users },
   { value: 'summaryModels', label: 'Summary', icon: SparkleIcon }
 ] as const;
 
@@ -123,6 +125,9 @@ export default function SettingsPage() {
             </TabsContent>
             <TabsContent value="vocabulary">
               <VocabularySettings />
+            </TabsContent>
+            <TabsContent value="speakers">
+              <DiarizationSettings />
             </TabsContent>
             <TabsContent value="summaryModels">
               <SummaryModelSettings />
