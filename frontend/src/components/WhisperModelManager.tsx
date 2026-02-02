@@ -582,11 +582,13 @@ function ModelCard({
               )}
               {isQuantizedModel(model.name) && (
                 <span className={`px-2 py-0.5 rounded-full text-xs ${
-                  getModelPerformanceBadge(model.name).color === 'green'
-                    ? 'bg-green-100 text-green-700'
-                    : getModelPerformanceBadge(model.name).color === 'orange'
-                      ? 'bg-orange-100 text-orange-700'
-                      : 'bg-gray-100 text-gray-700'
+                  getModelPerformanceBadge(model.name).color === 'purple'
+                    ? 'bg-purple-100 text-purple-700'
+                    : getModelPerformanceBadge(model.name).color === 'green'
+                      ? 'bg-green-100 text-green-700'
+                      : getModelPerformanceBadge(model.name).color === 'orange'
+                        ? 'bg-orange-100 text-orange-700'
+                        : 'bg-gray-100 text-gray-700'
                 }`}>
                   {getModelPerformanceBadge(model.name).label}
                 </span>

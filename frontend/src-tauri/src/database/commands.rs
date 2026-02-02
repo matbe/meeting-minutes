@@ -219,24 +219,38 @@ pub async fn initialize_fresh_database(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Get the database directory path
+/// Get the database directory path (respecting custom path if set)
 #[tauri::command]
 pub async fn get_database_directory(app: AppHandle) -> Result<String, String> {
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
-
-    Ok(app_data_dir.to_string_lossy().to_string())
+    // Try to get custom path from storage preferences
+    match crate::storage_preferences::get_database_directory_path(&app).await {
+        Ok(path) => Ok(path.to_string_lossy().to_string()),
+        Err(e) => {
+            // Fallback to default app data directory
+            log::warn!("Failed to get custom database path, using default: {}", e);
+            let app_data_dir = app
+                .path()
+                .app_data_dir()
+                .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+            Ok(app_data_dir.to_string_lossy().to_string())
+        }
+    }
 }
 
 /// Open the database folder in the system file explorer
 #[tauri::command]
 pub async fn open_database_folder(app: AppHandle) -> Result<(), String> {
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+    // Get the effective database directory (custom or default)
+    let app_data_dir = match crate::storage_preferences::get_database_directory_path(&app).await {
+        Ok(path) => path,
+        Err(e) => {
+            log::warn!("Failed to get custom database path, using default: {}", e);
+            app
+                .path()
+                .app_data_dir()
+                .map_err(|e| format!("Failed to get app data dir: {}", e))?
+        }
+    };
 
     // Ensure directory exists before trying to open it
     if !app_data_dir.exists() {
@@ -272,4 +286,26 @@ pub async fn open_database_folder(app: AppHandle) -> Result<(), String> {
 
     info!("Opened database folder: {}", folder_path);
     Ok(())
+}
+
+/// Open a dialog to select a folder for database storage
+#[tauri::command]
+pub async fn select_database_folder(app: AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    info!("Opening dialog to select database folder");
+
+    let folder_path = app
+        .dialog()
+        .file()
+        .blocking_pick_folder();
+
+    if let Some(path) = folder_path {
+        let path_str = path.to_string();
+        info!("User selected database folder: {}", path_str);
+        Ok(Some(path_str))
+    } else {
+        info!("User cancelled folder selection");
+        Ok(None)
+    }
 }

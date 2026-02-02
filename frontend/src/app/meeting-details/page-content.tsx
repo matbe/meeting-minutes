@@ -1,11 +1,15 @@
 "use client";
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { Summary, SummaryResponse } from '@/types';
+import { invoke } from '@tauri-apps/api/core';
+import { Summary, SummaryResponse, Speaker, TranscriptSegmentData, SpeakerLabel } from '@/types';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import Analytics from '@/lib/analytics';
 import { TranscriptPanel } from '@/components/MeetingDetails/TranscriptPanel';
 import { SummaryPanel } from '@/components/MeetingDetails/SummaryPanel';
+import { AudioPlayer, AudioPlayerRef } from '@/components/AudioPlayer';
+import { SpeakerTagModal } from '@/components/SpeakerTagModal';
+import { toast } from 'sonner';
 
 // Custom hooks
 import { useMeetingData } from '@/hooks/meeting-details/useMeetingData';
@@ -52,6 +56,21 @@ export default function PageContent({
   const [customPrompt, setCustomPrompt] = useState<string>('');
   const [isRecording] = useState(false);
   const [summaryResponse] = useState<SummaryResponse | null>(null);
+
+  // Audio player state
+  const [audioFilePath, setAudioFilePath] = useState<string | null>(null);
+  const [currentPlaybackTime, setCurrentPlaybackTime] = useState<number>(0);
+  const audioPlayerRef = useRef<AudioPlayerRef>(null);
+
+  // Speaker tag modal state
+  const [isSpeakerModalOpen, setIsSpeakerModalOpen] = useState(false);
+  const [speakers, setSpeakers] = useState<Speaker[]>([]);
+  const [playingSpeakerId, setPlayingSpeakerId] = useState<string | null>(null);
+  const speakerSampleTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  // Speaker labels mapping: segment_id -> { speaker_id, speaker_label }
+  const [segmentSpeakerMap, setSegmentSpeakerMap] = useState<Record<string, { speakerId: string; speakerLabel: string }>>({});
+  // Whether diarization is in progress
+  const [isEnhancing, setIsEnhancing] = useState(false);
 
   // Ref to store the modal open function from SummaryGeneratorButtonGroup
   const openModelSettingsRef = useRef<(() => void) | null>(null);
@@ -118,6 +137,266 @@ export default function PageContent({
     Analytics.trackPageView('meeting_details');
   }, []);
 
+  // Load persisted speaker labels when meeting loads
+  useEffect(() => {
+    const loadPersistedSpeakers = async () => {
+      console.log('🎤 [SpeakerLoad] Loading persisted speaker labels for meeting:', meeting.id);
+      
+      try {
+        // Load persisted speaker labels from database
+        const speakerLabels = await invoke<SpeakerLabel[]>('load_persisted_speaker_labels', { 
+          meetingId: meeting.id 
+        });
+        
+        if (speakerLabels.length > 0) {
+          console.log('🎤 [SpeakerLoad] ✅ Found', speakerLabels.length, 'persisted speaker labels');
+          
+          // Build segment -> speaker mapping
+          const newSegmentSpeakerMap: Record<string, { speakerId: string; speakerLabel: string }> = {};
+          speakerLabels.forEach(label => {
+            newSegmentSpeakerMap[label.segmentId] = {
+              speakerId: label.speakerId,
+              speakerLabel: label.speakerLabel,
+            };
+          });
+          setSegmentSpeakerMap(newSegmentSpeakerMap);
+          
+          // Also load speakers for the modal
+          const detectedSpeakers = await invoke<Speaker[]>('get_meeting_speakers', { meetingId: meeting.id });
+          if (detectedSpeakers.length > 0) {
+            setSpeakers(detectedSpeakers);
+          }
+        } else {
+          console.log('🎤 [SpeakerLoad] No persisted speaker labels found');
+        }
+      } catch (err) {
+        console.log('🎤 [SpeakerLoad] Could not load speaker labels:', err);
+        // Not an error - just means no diarization was done yet
+      }
+    };
+
+    loadPersistedSpeakers();
+  }, [meeting.id]);
+
+  // Load audio file path for the meeting
+  useEffect(() => {
+    const loadAudioPath = async () => {
+      console.log('🎵 [AudioLoad] Starting audio path lookup...');
+      console.log('🎵 [AudioLoad] Meeting folder_path:', meeting.folder_path);
+      console.log('🎵 [AudioLoad] Meeting ID:', meeting.id);
+      
+      if (!meeting.folder_path) {
+        console.warn('🎵 [AudioLoad] No folder_path available for meeting');
+        setAudioFilePath(null);
+        return;
+      }
+      
+      try {
+        console.log('🎵 [AudioLoad] Invoking get_meeting_audio_path with:', meeting.folder_path);
+        const path = await invoke<string | null>('get_meeting_audio_path', {
+          meetingFolder: meeting.folder_path
+        });
+        
+        if (path) {
+          console.log('🎵 [AudioLoad] ✅ Found audio file:', path);
+        } else {
+          console.log('🎵 [AudioLoad] ⚠️ No audio file found in folder');
+        }
+        
+        setAudioFilePath(path);
+      } catch (err) {
+        console.error('🎵 [AudioLoad] ❌ Error getting audio path:', err);
+        setAudioFilePath(null);
+      }
+    };
+
+    loadAudioPath();
+  }, [meeting.folder_path, meeting.id]);
+
+  // Handle transcript segment click - seek audio to that time
+  const handleSegmentClick = useCallback((audioStartTime: number) => {
+    console.log('🎵 Seeking to:', audioStartTime);
+    audioPlayerRef.current?.seekTo(audioStartTime);
+  }, []);
+
+  // Handle audio time update
+  const handleAudioTimeUpdate = useCallback((time: number) => {
+    setCurrentPlaybackTime(time);
+  }, []);
+
+  // Speaker enhancement handlers
+  const handleFullEnhance = useCallback(async () => {
+    console.log('🎤 Full enhance (re-transcribe with diarization) requested');
+    setIsEnhancing(true);
+    
+    // Show initial toast to indicate processing has started
+    toast.info('Analyzing speakers... This may take a few minutes for long recordings.');
+    
+    try {
+      // Call diarization API - this returns speaker labels for all segments
+      const speakerLabelsResult = await invoke<SpeakerLabel[]>('retranscribe_with_diarization', { meetingId: meeting.id });
+      
+      console.log('✅ Diarization complete:', speakerLabelsResult.length, 'segments labeled');
+      
+      // Build segment -> speaker mapping
+      const newSegmentSpeakerMap: Record<string, { speakerId: string; speakerLabel: string }> = {};
+      speakerLabelsResult.forEach(label => {
+        newSegmentSpeakerMap[label.segmentId] = {
+          speakerId: label.speakerId,
+          speakerLabel: label.speakerLabel,
+        };
+      });
+      setSegmentSpeakerMap(newSegmentSpeakerMap);
+      
+      // Fetch the detected speakers for the modal
+      const detectedSpeakers = await invoke<Speaker[]>('get_meeting_speakers', { meetingId: meeting.id });
+      setSpeakers(detectedSpeakers);
+      
+      toast.success(`Speaker detection complete! Found ${detectedSpeakers.length} speakers.`);
+    } catch (err) {
+      console.error('Failed to retranscribe with diarization:', err);
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      
+      // Show specific error messages for common issues
+      if (errorMessage.includes('Backend server not running') || errorMessage.includes('port 5167')) {
+        toast.error('Backend server not running. Please start the Meetily backend service.');
+      } else if (errorMessage.includes('Hugging Face token') || errorMessage.includes('HF_TOKEN')) {
+        toast.error('Please configure your Hugging Face token in Settings → Speakers.');
+      } else if (errorMessage.includes('model') && errorMessage.includes('load')) {
+        toast.error('Please load the diarization model in Settings → Speakers first.');
+      } else if (errorMessage.includes('pyannote') || errorMessage.includes('dependencies')) {
+        toast.error('Speaker diarization requires pyannote.audio. Please install dependencies.');
+      } else if (errorMessage.includes('AudioMetaData') || errorMessage.includes('torchaudio')) {
+        toast.error('Dependency version mismatch. Please reinstall: pip install torch<2.6 torchaudio<2.6');
+      } else {
+        toast.error(`Speaker detection failed: ${errorMessage}`);
+      }
+    } finally {
+      setIsEnhancing(false);
+    }
+  }, [meeting.id]);
+
+  const handleQuickLabel = useCallback(async () => {
+    console.log('🏷️ Quick label (open speaker tag modal) requested');
+    try {
+      // Fetch existing speakers from backend
+      const existingSpeakers = await invoke<Speaker[]>('get_meeting_speakers', { meetingId: meeting.id });
+      
+      if (existingSpeakers.length === 0) {
+        // No speakers detected yet - show message
+        toast.info('No speakers detected. Run "Full enhance" first to detect speakers.');
+        return;
+      }
+      
+      setSpeakers(existingSpeakers);
+      setIsSpeakerModalOpen(true);
+    } catch (err) {
+      console.error('Failed to get meeting speakers:', err);
+      toast.error('Failed to load speakers.');
+    }
+  }, [meeting.id]);
+
+  const handleTagClick = useCallback(() => {
+    console.log('🏷️ Tag button clicked - opening speaker modal');
+    handleQuickLabel();
+  }, [handleQuickLabel]);
+
+  const handleSaveSpeakers = useCallback(async (updatedSpeakers: Speaker[]) => {
+    console.log('💾 Saving speaker labels:', updatedSpeakers);
+    try {
+      // Call backend to update labels and get back updated segment mappings
+      const updatedLabels = await invoke<SpeakerLabel[]>('update_speaker_labels', {
+        meetingId: meeting.id,
+        speakers: updatedSpeakers,
+      });
+      
+      setSpeakers(updatedSpeakers);
+      
+      // Update segment -> speaker mapping with new labels
+      const newSegmentSpeakerMap: Record<string, { speakerId: string; speakerLabel: string }> = {};
+      updatedLabels.forEach(label => {
+        newSegmentSpeakerMap[label.segmentId] = {
+          speakerId: label.speakerId,
+          speakerLabel: label.speakerLabel,
+        };
+      });
+      setSegmentSpeakerMap(newSegmentSpeakerMap);
+      
+      console.log('✅ Speaker labels updated');
+      toast.success('Speaker names saved!');
+    } catch (err) {
+      console.error('Failed to save speaker labels:', err);
+      toast.error('Failed to save speaker names. Please try again.');
+    }
+  }, [meeting.id]);
+
+  const handlePlaySpeakerSample = useCallback(async (speaker: Speaker) => {
+    console.log('▶️ Playing sample for speaker:', speaker.label);
+    
+    // Clear any existing timeout
+    if (speakerSampleTimeoutRef.current) {
+      clearTimeout(speakerSampleTimeoutRef.current);
+      speakerSampleTimeoutRef.current = null;
+    }
+    
+    if (playingSpeakerId === speaker.id) {
+      // Stop playback
+      setPlayingSpeakerId(null);
+      audioPlayerRef.current?.pause();
+      return;
+    }
+    
+    // Get sample audio start time and seek to it
+    const sampleStart = speaker.sampleAudioStart ?? 0;
+    audioPlayerRef.current?.seekTo(sampleStart);
+    // Start playback
+    audioPlayerRef.current?.play();
+    setPlayingSpeakerId(speaker.id);
+    
+    // Auto-stop after 5 seconds
+    speakerSampleTimeoutRef.current = setTimeout(() => {
+      setPlayingSpeakerId(null);
+      audioPlayerRef.current?.pause();
+      speakerSampleTimeoutRef.current = null;
+    }, 5000);
+  }, [playingSpeakerId]);
+
+  // Cleanup speaker sample timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (speakerSampleTimeoutRef.current) {
+        clearTimeout(speakerSampleTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // Enhanced segments with speaker labels applied
+  const enhancedSegments = useMemo(() => {
+    if (!segments) return undefined;
+    
+    // Apply speaker labels from diarization results
+    return segments.map(segment => {
+      // Check if we have speaker info for this segment from diarization cache
+      const speakerInfo = segmentSpeakerMap[segment.id];
+      
+      if (speakerInfo) {
+        return {
+          ...segment,
+          speaker_id: speakerInfo.speakerId,
+          speaker_label: speakerInfo.speakerLabel,
+        };
+      }
+      
+      // Check if segment already has speaker info from database
+      if (segment.speaker_id && segment.speaker_label) {
+        return segment;
+      }
+      
+      // No speaker info - will show "Guest"
+      return segment;
+    });
+  }, [segments, segmentSpeakerMap]);
+
   // Auto-generate summary when flag is set
   useEffect(() => {
     let cancelled = false;
@@ -160,12 +439,27 @@ export default function PageContent({
           disableAutoScroll={true}
           // Pagination props for efficient loading
           usePagination={true}
-          segments={segments}
+          segments={enhancedSegments}
           hasMore={hasMore}
           isLoadingMore={isLoadingMore}
           totalCount={totalCount}
           loadedCount={loadedCount}
           onLoadMore={onLoadMore}
+          // Audio playback props
+          onSegmentClick={audioFilePath ? handleSegmentClick : undefined}
+          currentPlaybackTime={currentPlaybackTime}
+          // Audio player
+          audioFilePath={audioFilePath}
+          audioPlayerRef={audioPlayerRef}
+          onAudioTimeUpdate={handleAudioTimeUpdate}
+          // Speaker enhancement props
+          onFullEnhance={handleFullEnhance}
+          onQuickLabel={handleQuickLabel}
+          onTagClick={handleTagClick}
+          isEnhancing={isEnhancing}
+          // Retranscription props
+          meetingId={meeting.id}
+          meetingFolderPath={meeting.folder_path}
         />
         <SummaryPanel
           meeting={meeting}
@@ -203,6 +497,16 @@ export default function PageContent({
           onOpenModelSettings={handleRegisterModalOpen}
         />
       </div>
+      
+      {/* Speaker Tag Modal */}
+      <SpeakerTagModal
+        isOpen={isSpeakerModalOpen}
+        onClose={() => setIsSpeakerModalOpen(false)}
+        speakers={speakers}
+        onSaveSpeakers={handleSaveSpeakers}
+        onPlaySample={handlePlaySpeakerSample}
+        playingSpeakerId={playingSpeakerId}
+      />
     </motion.div>
   );
 }

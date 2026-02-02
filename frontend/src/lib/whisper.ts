@@ -91,7 +91,7 @@ export const MODEL_CONFIGS: Record<string, Partial<ModelInfo>> = {
   // Q5_0 quantized models (balanced speed/accuracy)
   'large-v3-q5_0': {
     description: 'Quantized large model, best balance of speed and accuracy.',
-    size_mb: 1000,
+    size_mb: 1050,
     accuracy: 'High',
     speed: 'Medium'
   },
@@ -116,6 +116,44 @@ export const MODEL_CONFIGS: Record<string, Partial<ModelInfo>> = {
   'tiny-q5_0': {
     description: 'Quantized tiny model, ~50% faster processing.',
     size_mb: 26,
+    accuracy: 'Decent',
+    speed: 'Very Fast'
+  },
+
+  // Q8_0 quantized models (higher quality than q5_0)
+  'large-v3-q8_0': {
+    description: 'Higher quality quantized large model, excellent accuracy.',
+    size_mb: 2997,
+    accuracy: 'High',
+    speed: 'Slow'
+  },
+  'large-v3-turbo-q8_0': {
+    description: 'Higher quality quantized turbo model, great balance.',
+    size_mb: 843,
+    accuracy: 'High',
+    speed: 'Medium'
+  },
+  'medium-q8_0': {
+    description: 'Higher quality quantized medium model, near f16 quality.',
+    size_mb: 1485,
+    accuracy: 'High',
+    speed: 'Slow'
+  },
+  'small-q8_0': {
+    description: 'Higher quality quantized small model, better than q5_0.',
+    size_mb: 488,
+    accuracy: 'Good',
+    speed: 'Medium'
+  },
+  'base-q8_0': {
+    description: 'Higher quality quantized base model.',
+    size_mb: 148,
+    accuracy: 'Good',
+    speed: 'Fast'
+  },
+  'tiny-q8_0': {
+    description: 'Higher quality quantized tiny model.',
+    size_mb: 42,
     accuracy: 'Decent',
     speed: 'Very Fast'
   },
@@ -172,16 +210,17 @@ export function formatFileSize(sizeMb: number): string {
   return `${sizeMb}MB`;
 }
 
-// Helper function to get model type (f16, q5_0, q4_0)
-export function getModelType(modelName: string): 'f16' | 'q5_0' | 'q4_0' {
+// Helper function to get model type (f16, q5_0, q8_0, q4_0)
+export function getModelType(modelName: string): 'f16' | 'q5_0' | 'q8_0' | 'q4_0' {
   if (modelName.includes('-q5_0')) return 'q5_0';
+  if (modelName.includes('-q8_0')) return 'q8_0';
   if (modelName.includes('-q4_0')) return 'q4_0';
   return 'f16';
 }
 
 // Helper function to get model base name (without quantization suffix)
 export function getModelBaseName(modelName: string): string {
-  return modelName.replace(/-q[45]_0$/, '');
+  return modelName.replace(/-q[458]_0$/, '');
 }
 
 // Helper function to check if model is quantized
@@ -195,6 +234,8 @@ export function getModelPerformanceBadge(modelName: string): { label: string; co
   switch (type) {
     case 'f16':
       return { label: 'Full Precision', color: 'blue' };
+    case 'q8_0':
+      return { label: 'High Quality', color: 'purple' };
     case 'q5_0':
       return { label: 'Balanced', color: 'green' };
     case 'q4_0':
@@ -245,7 +286,9 @@ export function getModelTagline(modelName: string, speed: ProcessingSpeed, accur
   // Add quantization note if applicable
   if (isQuantized) {
     const quantType = getModelType(modelName);
-    if (quantType === 'q5_0') {
+    if (quantType === 'q8_0') {
+      featureText += ', high quality';
+    } else if (quantType === 'q5_0') {
       featureText += ', optimized';
     } else if (quantType === 'q4_0') {
       featureText += ', ultra fast';
@@ -267,12 +310,12 @@ export function groupModelsByBase(models: ModelInfo[]): Record<string, ModelInfo
     grouped[baseName].push(model);
   });
 
-  // Sort each group: f16 first, then q5_0, then q4_0
+  // Sort each group: f16 first, then q8_0, then q5_0, then q4_0
   Object.keys(grouped).forEach(baseName => {
     grouped[baseName].sort((a, b) => {
       const aType = getModelType(a.name);
       const bType = getModelType(b.name);
-      const order = { 'f16': 0, 'q5_0': 1, 'q4_0': 2 };
+      const order = { 'f16': 0, 'q8_0': 1, 'q5_0': 2, 'q4_0': 3 };
       return order[aType] - order[bType];
     });
   });

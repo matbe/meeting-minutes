@@ -46,9 +46,9 @@ if exist "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxi
     call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat" >nul 2>&1
 
     REM Manually set up the environment
-    set "LIB=C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.22621.0\um\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.22621.0\ucrt\x64"
-    set "INCLUDE=C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.22621.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.22621.0\shared;C:\Program Files (x86)\Windows Kits\10\Include\10.0.22621.0\ucrt"
-    set "PATH=C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\bin\HostX64\x64;C:\Program Files (x86)\Windows Kits\10\bin\10.0.22621.0\x64;%PATH%"
+    set "LIB=C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64"
+    set "INCLUDE=C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt"
+    set "PATH=C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\bin\HostX64\x64;C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64;%PATH%"
 ) else if exist "C:\Program Files\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat" (
     echo    Using Visual Studio 2022 Build Tools
     call "C:\Program Files\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat" >nul 2>&1
@@ -58,21 +58,29 @@ if exist "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxi
 ) else if exist "C:\Program Files (x86)\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\Build\vcvars64.bat" (
     echo    Using Visual Studio 2022 Professional
     call "C:\Program Files (x86)\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\Build\vcvars64.bat" >nul 2>&1
-) else if exist "C:\Program Files (x86)\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat" (
+) else if exist "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat" (
     echo    Using Visual Studio 2022 Enterprise
+	set "LIBCLANG_PATH=C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\Llvm\x64\lib"
     call "C:\Program Files (x86)\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat" >nul 2>&1
 ) else if exist "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvars64.bat" (
     echo    Using Visual Studio 2019 Build Tools
     call "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvars64.bat" >nul 2>&1
 ) else (
     echo    ⚠️  Visual Studio not found, using manual SDK setup
-    set "WindowsSDKVersion=10.0.22621.0"
-    set "WindowsSDKLibVersion=10.0.22621.0"
-    set "WindowsSDKIncludeVersion=10.0.22621.0"
-    set "LIB=C:\Program Files (x86)\Windows Kits\10\Lib\10.0.22621.0\um\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.22621.0\ucrt\x64;%LIB%"
-    set "INCLUDE=C:\Program Files (x86)\Windows Kits\10\Include\10.0.22621.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.22621.0\shared;C:\Program Files (x86)\Windows Kits\10\Include\10.0.22621.0\ucrt;%INCLUDE%"
-    set "PATH=C:\Program Files (x86)\Windows Kits\10\bin\10.0.22621.0\x64;%PATH%"
+    set "WindowsSDKVersion=10.0.26100.0"
+    set "WindowsSDKLibVersion=10.0.26100.0"
+    set "WindowsSDKIncludeVersion=10.0.26100.0"
+    set "LIB=C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;%LIB%"
+    set "INCLUDE=C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;%INCLUDE%"
+    set "PATH=C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64;%PATH%"
 )
+
+REM Set CUDA arch
+set "CMAKE_CUDA_ARCHITECTURES=75;86;89;90;100"
+set "CUDAARCHS=75;86;89;90;100"
+set "CMAKE_CUDA_STANDARD=17"
+set "CMAKE_CXX_STANDARD=17"
+set "CUDAFLAGS=-std=c++17
 
 REM Export environment variables for the child process
 set "RUST_ENV_LIB=%LIB%"
@@ -115,6 +123,11 @@ if %USE_PNPM% equ 0 (
         exit /b 1
     )
 )
+
+REM Force correct CMake generator
+set CMAKE_GENERATOR=Visual Studio 17 2022
+set CMAKE_GENERATOR_PLATFORM=x64
+set CMAKE_GENERATOR_TOOLSET=host=x64
 
 REM Detect GPU feature
 echo 🔍 Detecting GPU features...
@@ -236,7 +249,7 @@ echo   - No GPU        : Builds with OpenBLAS CPU optimization
 echo.
 echo REQUIREMENTS:
 echo   - Visual Studio 2022 Build Tools
-echo   - Windows SDK 10.0.22621.0 or compatible
+echo   - Windows SDK 10.0.26100.0 or compatible
 echo   - Rust toolchain installed
 echo   - LLVM installed at C:\Program Files\LLVM\bin
 echo.

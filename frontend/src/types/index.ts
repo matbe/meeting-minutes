@@ -16,6 +16,9 @@ export interface Transcript {
   audio_start_time?: number; // Seconds from recording start (e.g., 125.3)
   audio_end_time?: number;   // Seconds from recording start (e.g., 128.6)
   duration?: number;          // Segment duration in seconds (e.g., 3.3)
+  // Speaker diarization fields
+  speaker_id?: string;        // Unique identifier for the speaker
+  speaker_label?: string;     // Display label for the speaker (e.g., "John", "Speaker 1")
 }
 
 export interface TranscriptUpdate {
@@ -107,6 +110,25 @@ export interface TranscriptSegmentData {
   endTime?: number; // audio_end_time in seconds
   text: string;
   confidence?: number;
+  // Speaker diarization fields
+  speaker_id?: string;        // Unique identifier for the speaker
+  speaker_label?: string;     // Display label for the speaker (e.g., "John", "Speaker 1")
+}
+
+// Speaker data for diarization
+export interface Speaker {
+  id: string;                  // Unique identifier for the speaker
+  label: string;               // Display label (e.g., "Speaker 1", "John")
+  segments: number;            // Number of transcript segments for this speaker
+  totalDuration: number;       // Total speaking duration in seconds
+  sampleAudioStart?: number;   // Start time of a sample audio clip for this speaker
+}
+
+// Speaker label assignment for a transcript segment
+export interface SpeakerLabel {
+  segmentId: string;           // Transcript segment ID
+  speakerId: string;           // Speaker ID
+  speakerLabel: string;        // Display label for the speaker
 }
 
 // ===== VOCABULARY TYPES =====

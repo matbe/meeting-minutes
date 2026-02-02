@@ -630,12 +630,235 @@ async def search_transcripts(request: SearchRequest):
         logger.error(f"Error searching transcripts: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+# ==================== Speaker Diarization Endpoints ====================
+
+# Lazy import diarization service to avoid errors if dependencies not installed
+_diarization_service = None
+
+def get_diarization_service():
+    """Get or create the diarization service singleton."""
+    global _diarization_service
+    if _diarization_service is None:
+        try:
+            from diarization_service import get_diarization_service as _get_service
+            _diarization_service = _get_service()
+        except ImportError as e:
+            logger.warning(f"Diarization service not available: {e}")
+            raise HTTPException(
+                status_code=503,
+                detail="Speaker diarization not available. Please install pyannote.audio dependencies."
+            )
+    return _diarization_service
+
+
+class DiarizationRequest(BaseModel):
+    """Request for speaker diarization on an audio file"""
+    audio_path: str
+    meeting_id: Optional[str] = None
+    min_speakers: Optional[int] = None
+    max_speakers: Optional[int] = None
+
+
+class DiarizationConfigRequest(BaseModel):
+    """Request to configure diarization settings"""
+    hf_token: Optional[str] = None
+
+
+class SpeakerLabelUpdate(BaseModel):
+    """Request to update speaker labels"""
+    meeting_id: str
+    speaker_mappings: dict  # Maps speaker_id to speaker_label (e.g., {"SPEAKER_00": "John"})
+
+
+@app.get("/diarization/status")
+async def get_diarization_status():
+    """Get the status of the diarization service and models"""
+    try:
+        service = get_diarization_service()
+        model_info = await service.check_model_status()
+        
+        return JSONResponse(content={
+            "available": True,
+            "model_loaded": service.is_model_loaded,
+            "device": service.device,
+            "model": model_info.__dict__ if model_info else None
+        })
+    except HTTPException:
+        return JSONResponse(content={
+            "available": False,
+            "model_loaded": False,
+            "device": "cpu",
+            "model": None,
+            "error": "Diarization dependencies not installed"
+        })
+    except Exception as e:
+        logger.error(f"Error getting diarization status: {e}")
+        return JSONResponse(content={
+            "available": False,
+            "model_loaded": False,
+            "device": "cpu",
+            "model": None,
+            "error": str(e)
+        })
+
+
+@app.post("/diarization/configure")
+async def configure_diarization(config: DiarizationConfigRequest):
+    """Configure the diarization service with Hugging Face token"""
+    try:
+        if config.hf_token:
+            # Save token to database for persistence
+            await db.save_diarization_config(hf_token=config.hf_token)
+            
+            # Reinitialize service with new token
+            global _diarization_service
+            from diarization_service import DiarizationService
+            _diarization_service = DiarizationService(hf_token=config.hf_token)
+            
+            logger.info("Diarization service configured with new HF token")
+            
+        return {"status": "success", "message": "Diarization configured successfully"}
+    except Exception as e:
+        logger.error(f"Error configuring diarization: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/diarization/load-model")
+async def load_diarization_model():
+    """Load the diarization model into memory"""
+    try:
+        service = get_diarization_service()
+        success = await service.load_model()
+        
+        if success:
+            return {"status": "success", "message": "Model loaded successfully", "device": service.device}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to load model")
+    except Exception as e:
+        logger.error(f"Error loading diarization model: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/diarization/unload-model")
+async def unload_diarization_model():
+    """Unload the diarization model to free memory"""
+    try:
+        service = get_diarization_service()
+        service.unload_model()
+        return {"status": "success", "message": "Model unloaded successfully"}
+    except Exception as e:
+        logger.error(f"Error unloading diarization model: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/diarization/process")
+async def process_diarization(request: DiarizationRequest, background_tasks: BackgroundTasks):
+    """
+    Process speaker diarization on an audio file.
+    
+    This identifies distinct speakers in the audio and returns their speaking segments.
+    Results can be used to assign speaker labels to transcript segments.
+    """
+    try:
+        service = get_diarization_service()
+        
+        # Ensure model is loaded
+        if not service.is_model_loaded:
+            await service.load_model()
+        
+        # Run diarization
+        result = await service.diarize_audio(
+            audio_path=request.audio_path,
+            min_speakers=request.min_speakers,
+            max_speakers=request.max_speakers
+        )
+        
+        # If meeting_id provided, update transcripts with speaker info
+        if request.meeting_id:
+            # Get meeting transcripts from database
+            meeting = await db.get_meeting(request.meeting_id)
+            if meeting and meeting.get("transcripts"):
+                # Assign speakers to transcripts
+                updated_transcripts = service.assign_speakers_to_transcripts(
+                    result,
+                    meeting["transcripts"]
+                )
+                
+                # Save updated transcripts with speaker IDs
+                await db.update_transcript_speakers(request.meeting_id, updated_transcripts)
+        
+        return JSONResponse(content={
+            "status": "success",
+            "result": result.to_dict()
+        })
+        
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error processing diarization: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/diarization/update-speaker-labels")
+async def update_speaker_labels(request: SpeakerLabelUpdate):
+    """
+    Update speaker labels for a meeting's transcripts.
+    
+    Maps generic speaker IDs (e.g., "SPEAKER_00") to human-readable names (e.g., "John").
+    These labels are persisted and used in summaries.
+    """
+    try:
+        # Update speaker labels in database
+        await db.update_speaker_labels(request.meeting_id, request.speaker_mappings)
+        
+        return {"status": "success", "message": "Speaker labels updated successfully"}
+    except Exception as e:
+        logger.error(f"Error updating speaker labels: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/diarization/speaker-labels/{meeting_id}")
+async def get_speaker_labels(meeting_id: str):
+    """Get saved speaker labels for a meeting"""
+    try:
+        labels = await db.get_speaker_labels(meeting_id)
+        return JSONResponse(content={"meeting_id": meeting_id, "speaker_labels": labels or {}})
+    except Exception as e:
+        logger.error(f"Error getting speaker labels: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/diarization/config")
+async def get_diarization_config():
+    """Get current diarization configuration"""
+    try:
+        config = await db.get_diarization_config()
+        # Mask the token for security
+        if config and config.get("hf_token"):
+            token = config["hf_token"]
+            config["hf_token_masked"] = f"{token[:4]}...{token[-4:]}" if len(token) > 8 else "****"
+            config["hf_token_configured"] = True
+        else:
+            config = {"hf_token_configured": False}
+        
+        return JSONResponse(content=config)
+    except Exception as e:
+        logger.error(f"Error getting diarization config: {e}")
+        return JSONResponse(content={"hf_token_configured": False})
+
+
 @app.on_event("shutdown")
 async def shutdown_event():
     """Cleanup on API shutdown"""
     logger.info("API shutting down, cleaning up resources")
     try:
         processor.cleanup()
+        # Clean up diarization service if loaded
+        global _diarization_service
+        if _diarization_service is not None:
+            _diarization_service.unload_model()
+            _diarization_service = None
         logger.info("Successfully cleaned up resources")
     except Exception as e:
         logger.error(f"Error during cleanup: {str(e)}", exc_info=True)

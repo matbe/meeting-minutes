@@ -63,8 +63,75 @@ pub async fn whisper_get_available_models() -> Result<Vec<ModelInfo>, String> {
             .await
             .map_err(|e| format!("Failed to discover models: {}", e))
     } else {
-        Err("Whisper engine not initialized".to_string())
+        // Fallback: scan models directory directly without initialized engine
+        log::info!("Whisper engine not initialized, scanning models directory directly");
+        discover_models_standalone()
     }
+}
+
+/// Discover Whisper models by scanning the models directory directly
+/// Used when the Whisper engine isn't initialized (e.g., when using Parakeet for live transcription)
+fn discover_models_standalone() -> Result<Vec<ModelInfo>, String> {
+    use crate::whisper_engine::ModelStatus;
+
+    let models_dir = get_models_directory()
+        .ok_or_else(|| "Models directory not initialized".to_string())?;
+
+    // Whisper models are stored directly in the models directory (not in a whisper subdirectory)
+    let whisper_dir = models_dir.clone();
+
+    log::info!("Scanning for Whisper models in: {}", whisper_dir.display());
+
+    let model_configs = [
+        ("tiny", "ggml-tiny.bin", 39, "Decent", "Very Fast", "Fastest processing"),
+        ("base", "ggml-base.bin", 142, "Good", "Fast", "Good balance"),
+        ("small", "ggml-small.bin", 466, "Good", "Medium", "Better accuracy"),
+        ("medium", "ggml-medium.bin", 1420, "High", "Slow", "High accuracy"),
+        ("large-v3-turbo", "ggml-large-v3-turbo.bin", 809, "High", "Medium", "Best accuracy with speed"),
+        ("large-v3", "ggml-large-v3.bin", 3174, "High", "Slow", "Best accuracy"),
+        ("tiny-q5_0", "ggml-tiny-q5_0.bin", 26, "Decent", "Very Fast", "Quantized tiny"),
+        ("base-q5_0", "ggml-base-q5_0.bin", 85, "Good", "Fast", "Quantized base"),
+        ("small-q5_0", "ggml-small-q5_0.bin", 280, "Good", "Fast", "Quantized small"),
+        ("medium-q5_0", "ggml-medium-q5_0.bin", 852, "High", "Medium", "Quantized medium"),
+        ("large-v3-turbo-q5_0", "ggml-large-v3-turbo-q5_0.bin", 574, "High", "Medium", "Quantized large turbo"),
+        ("large-v3-q5_0", "ggml-large-v3-q5_0.bin", 1050, "High", "Slow", "Quantized large"),
+    ];
+
+    let mut models = Vec::new();
+
+    for (name, filename, size_mb, accuracy, speed, description) in model_configs {
+        let model_path = whisper_dir.join(filename);
+        let status = if model_path.exists() {
+            match std::fs::metadata(&model_path) {
+                Ok(metadata) => {
+                    let file_size_mb = metadata.len() / (1024 * 1024);
+                    if file_size_mb >= 1 {
+                        ModelStatus::Available
+                    } else {
+                        ModelStatus::Missing
+                    }
+                }
+                Err(_) => ModelStatus::Missing,
+            }
+        } else {
+            ModelStatus::Missing
+        };
+
+        models.push(ModelInfo {
+            name: name.to_string(),
+            path: model_path,
+            size_mb,
+            status,
+            accuracy: accuracy.to_string(),
+            speed: speed.to_string(),
+            description: description.to_string(),
+        });
+    }
+
+    let downloaded_count = models.iter().filter(|m| matches!(m.status, ModelStatus::Available)).count();
+    log::info!("Found {} downloaded Whisper models", downloaded_count);
+
+    Ok(models)
 }
 
 #[command]
@@ -347,18 +414,27 @@ pub async fn whisper_transcribe_audio(audio_data: Vec<f32>) -> Result<String, St
     }
 }
 
+/// Get the models directory path (respecting custom path if set)
 #[command]
-pub async fn whisper_get_models_directory() -> Result<String, String> {
-    let engine = {
-        let guard = WHISPER_ENGINE.lock().unwrap();
-        guard.as_ref().cloned()
-    };
+pub async fn whisper_get_models_directory(app: AppHandle) -> Result<String, String> {
+    // Try to get custom path from storage preferences
+    match crate::storage_preferences::get_models_directory_path(&app).await {
+        Ok(path) => Ok(path.to_string_lossy().to_string()),
+        Err(e) => {
+            log::warn!("Failed to get custom models path, falling back to engine's path: {}", e);
+            // Fallback to the engine's configured path
+            let engine = {
+                let guard = WHISPER_ENGINE.lock().unwrap();
+                guard.as_ref().cloned()
+            };
 
-    if let Some(engine) = engine {
-        let path = engine.get_models_directory().await;
-        Ok(path.to_string_lossy().to_string())
-    } else {
-        Err("Whisper engine not initialized".to_string())
+            if let Some(engine) = engine {
+                let path = engine.get_models_directory().await;
+                Ok(path.to_string_lossy().to_string())
+            } else {
+                Err("Whisper engine not initialized".to_string())
+            }
+        }
     }
 }
 
@@ -464,9 +540,16 @@ pub async fn whisper_delete_corrupted_model(model_name: String) -> Result<String
 
 /// Open the models folder in the system file explorer
 #[command]
-pub async fn open_models_folder() -> Result<(), String> {
-    let models_dir = get_models_directory()
-        .ok_or_else(|| "Models directory not initialized".to_string())?;
+pub async fn open_models_folder(app: AppHandle) -> Result<(), String> {
+    // Get the effective models directory (custom or default)
+    let models_dir = match crate::storage_preferences::get_models_directory_path(&app).await {
+        Ok(path) => path,
+        Err(e) => {
+            log::warn!("Failed to get custom models path, using default: {}", e);
+            get_models_directory()
+                .ok_or_else(|| "Models directory not initialized".to_string())?
+        }
+    };
 
     // Ensure directory exists before trying to open it
     if !models_dir.exists() {
@@ -502,4 +585,26 @@ pub async fn open_models_folder() -> Result<(), String> {
 
     log::info!("Opened models folder: {}", folder_path);
     Ok(())
+}
+
+/// Open a dialog to select a folder for models storage
+#[command]
+pub async fn select_models_folder(app: AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    log::info!("Opening dialog to select models folder");
+
+    let folder_path = app
+        .dialog()
+        .file()
+        .blocking_pick_folder();
+
+    if let Some(path) = folder_path {
+        let path_str = path.to_string();
+        log::info!("User selected models folder: {}", path_str);
+        Ok(Some(path_str))
+    } else {
+        log::info!("User cancelled folder selection");
+        Ok(None)
+    }
 }

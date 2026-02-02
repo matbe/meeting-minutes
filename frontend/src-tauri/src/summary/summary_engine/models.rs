@@ -100,6 +100,27 @@ pub fn get_available_models() -> Vec<ModelDef> {
             },
             description: "Balanced model. Great quality/speed trade-off. Requires ~3.5GB RAM.".to_string(),
         },
+                ModelDef {
+            name: "Llama-3.1-8B".to_string(),
+            display_name: "Llama 3.1 8B (Large)".to_string(),
+            gguf_file: "Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf".to_string(),
+            template: "llama31".to_string(),
+            download_url: "https://huggingface.co/trinhvanhung/Meta-Llama-3.1-8B-Instruct-Q4_K_M/resolve/main/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf".to_string(),
+            size_mb: 4693,
+            context_size: 131072, // Supports 128k, but 32k is good for local·
+            layer_count: 32,
+            sampling: SamplingParams {
+                //repeat_penalty: 1.1,
+                //frequency_penalty: 0.0,
+                //presence_penalty: 0.0,
+                temperature: 0.3,
+                top_k: 40,
+                top_p: 0.9,
+                stop_tokens: vec!["<|eot_id|>".to_string()],
+            },
+            description: "Large model. Best quality/speed trade-off. Requires ~8.5GB RAM.".to_string(),
+        },
+        
     ]
 }
 
@@ -145,6 +166,16 @@ pub const GEMMA3_TEMPLATE: &str = "\
 <start_of_turn>model
 ";
 
+/// Llama 3.1 Instruct chat template format
+pub const LLAMA31_TEMPLATE: &str = "\
+<|begin_of_text|><|start_header_id|>system<|end_header_id|>
+
+{system_prompt}<|eot_id|><|start_header_id|>user<|end_header_id|>
+
+{user_prompt}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+
+";
+
 /// Format a prompt using the specified template
 ///
 /// # Arguments
@@ -161,6 +192,7 @@ pub fn format_prompt(
 ) -> Result<String> {
     let template = match template_name {
         "gemma3" => GEMMA3_TEMPLATE,
+        "llama31" => LLAMA31_TEMPLATE,
         _ => return Err(anyhow!("Unknown template: {}", template_name)),
     };
 
