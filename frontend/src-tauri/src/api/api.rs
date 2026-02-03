@@ -31,6 +31,7 @@ pub struct ApiResponse<T> {
 pub struct Meeting {
     pub id: String,
     pub title: String,
+    pub folder_path: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -347,6 +348,7 @@ pub async fn api_get_meetings<R: Runtime>(
                 .map(|m| Meeting {
                     id: m.id,
                     title: m.title,
+                    folder_path: m.folder_path,
                 })
                 .collect();
             Ok(result)
@@ -780,6 +782,63 @@ pub async fn api_delete_meeting<R: Runtime>(
             log_error!("Error deleting meeting {}: {}", meeting_id, e);
             Err(format!("Failed to delete meeting: {}", e))
         }
+    }
+}
+
+#[tauri::command]
+pub async fn api_delete_meeting_audio<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+) -> Result<serde_json::Value, String> {
+    log_info!("api_delete_meeting_audio called for meeting_id: {}", meeting_id);
+
+    let pool = state.db_manager.pool();
+
+    // Get meeting metadata to find folder path
+    let meeting = MeetingsRepository::get_meeting_metadata(pool, &meeting_id)
+        .await
+        .map_err(|e| format!("Failed to get meeting: {}", e))?
+        .ok_or_else(|| format!("Meeting not found: {}", meeting_id))?;
+
+    let folder_path = meeting.folder_path
+        .ok_or_else(|| "Meeting has no folder path".to_string())?;
+
+    // Look for audio file in the folder
+    let folder = std::path::Path::new(&folder_path);
+    
+    if !folder.exists() {
+        return Err("Meeting folder does not exist".to_string());
+    }
+
+    // Check for audio.mp4 first (default name)
+    let audio_extensions = vec!["mp4", "wav", "m4a", "webm", "ogg", "flac", "aac"];
+    let mut audio_file_deleted = false;
+
+    for entry in std::fs::read_dir(folder)
+        .map_err(|e| format!("Failed to read folder: {}", e))? {
+        if let Ok(entry) = entry {
+            let path = entry.path();
+            if let Some(ext) = path.extension() {
+                let ext_lower = ext.to_string_lossy().to_lowercase();
+                if audio_extensions.contains(&ext_lower.as_str()) {
+                    std::fs::remove_file(&path)
+                        .map_err(|e| format!("Failed to delete audio file: {}", e))?;
+                    log_info!("Deleted audio file: {}", path.display());
+                    audio_file_deleted = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    if audio_file_deleted {
+        Ok(serde_json::json!({
+            "status": "success",
+            "message": "Audio file deleted successfully"
+        }))
+    } else {
+        Err("No audio file found to delete".to_string())
     }
 }
 

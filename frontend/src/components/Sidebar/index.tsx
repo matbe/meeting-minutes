@@ -59,6 +59,8 @@ const Sidebar: React.FC = () => {
   const { isRecording } = useRecordingState();
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['meetings']));
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [meetingSearchQuery, setMeetingSearchQuery] = useState<string>('');
+  const [hideNoAudioMeetings, setHideNoAudioMeetings] = useState(false);
   const [showModelSettings, setShowModelSettings] = useState(false);
   const [modelConfig, setModelConfig] = useState<ModelConfig>({
     provider: 'ollama',
@@ -99,7 +101,7 @@ const Sidebar: React.FC = () => {
   // }, [settingsSaveSuccess]);
 
 
-  const [deleteModalState, setDeleteModalState] = useState<{ isOpen: boolean; itemId: string | null }>({ isOpen: false, itemId: null });
+  const [deleteModalState, setDeleteModalState] = useState<{ isOpen: boolean; itemId: string | null; hasAudioFile: boolean }>({ isOpen: false, itemId: null, hasAudioFile: true });
 
   useEffect(() => {
     // Note: Don't set hardcoded defaults - let DB be the source of truth
@@ -251,110 +253,178 @@ const Sidebar: React.FC = () => {
     }
   }, [expandedFolders, searchTranscripts]);
 
+  // Wildcard search helper - treats search as substring match with implicit wildcards
+  const matchesWildcard = useCallback((text: string, pattern: string): boolean => {
+    // If pattern doesn't start with *, add implicit wildcard at start
+    let searchPattern = pattern.startsWith('*') ? pattern : `*${pattern}`;
+    // If pattern doesn't end with *, add implicit wildcard at end
+    searchPattern = searchPattern.endsWith('*') ? searchPattern : `${searchPattern}*`;
+    
+    // Convert wildcard pattern to regex
+    const regexPattern = searchPattern
+      .split('*')
+      .map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+      .join('.*');
+    const regex = new RegExp(`^${regexPattern}$`, 'i');
+    return regex.test(text);
+  }, []);
+
   // Combine search results with sidebar items
   const filteredSidebarItems = useMemo(() => {
-    if (!searchQuery.trim()) return sidebarItems;
-
-    // If we have search results, highlight matching meetings
-    if (searchResults.length > 0) {
-      // Get the IDs of meetings that matched in transcripts
-      const matchedMeetingIds = new Set(searchResults.map(result => result.id));
-
-      return sidebarItems
-        .map(folder => {
-          // Always include folders in the results
-          if (folder.type === 'folder') {
-            if (!folder.children) return folder;
-
-            // Filter children based on search results or title match
-            const filteredChildren = folder.children.filter(item => {
-              // Include if the meeting ID is in our search results
-              if (matchedMeetingIds.has(item.id)) return true;
-
-              // Or if the title matches the search query
-              return item.title.toLowerCase().includes(searchQuery.toLowerCase());
-            });
-
-            return {
-              ...folder,
-              children: filteredChildren
-            };
-          }
-
-          // For non-folder items, check if they match the search
-          return (matchedMeetingIds.has(folder.id) ||
-            folder.title.toLowerCase().includes(searchQuery.toLowerCase()))
-            ? folder : undefined;
-        })
-        .filter((item): item is SidebarItem => item !== undefined); // Type-safe filter
-    } else {
-      // Fall back to title-only filtering if no transcript results
-      return sidebarItems
-        .map(folder => {
-          // Always include folders in the results
-          if (folder.type === 'folder') {
-            if (!folder.children) return folder;
-
-            // Filter children based on search query
-            const filteredChildren = folder.children.filter(item =>
-              item.title.toLowerCase().includes(searchQuery.toLowerCase())
-            );
-
-            return {
-              ...folder,
-              children: filteredChildren
-            };
-          }
-
-          // For non-folder items, check if they match the search
-          return folder.title.toLowerCase().includes(searchQuery.toLowerCase()) ? folder : undefined;
-        })
-        .filter((item): item is SidebarItem => item !== undefined); // Type-safe filter
+    if (!searchQuery.trim() && !meetingSearchQuery.trim() && !hideNoAudioMeetings) {
+      return sidebarItems;
     }
-  }, [sidebarItems, searchQuery, searchResults, expandedFolders]);
+
+    // If we have legacy searchQuery (global search), use old behavior
+    if (searchQuery.trim()) {
+      // If we have search results, highlight matching meetings
+      if (searchResults.length > 0) {
+        // Get the IDs of meetings that matched in transcripts
+        const matchedMeetingIds = new Set(searchResults.map(result => result.id));
+
+        return sidebarItems
+          .map(folder => {
+            // Always include folders in the results
+            if (folder.type === 'folder') {
+              if (!folder.children) return folder;
+
+              // Filter children based on search results or title match
+              const filteredChildren = folder.children.filter(item => {
+                // Include if the meeting ID is in our search results
+                if (matchedMeetingIds.has(item.id)) return true;
+
+                // Or if the title matches the search query
+                return item.title.toLowerCase().includes(searchQuery.toLowerCase());
+              });
+
+              return {
+                ...folder,
+                children: filteredChildren
+              };
+            }
+
+            // For non-folder items, check if they match the search
+            return (matchedMeetingIds.has(folder.id) ||
+              folder.title.toLowerCase().includes(searchQuery.toLowerCase()))
+              ? folder : undefined;
+          })
+          .filter((item): item is SidebarItem => item !== undefined); // Type-safe filter
+      } else {
+        // Fall back to title-only filtering if no transcript results
+        return sidebarItems
+          .map(folder => {
+            // Always include folders in the results
+            if (folder.type === 'folder') {
+              if (!folder.children) return folder;
+
+              // Filter children based on search query
+              const filteredChildren = folder.children.filter(item =>
+                item.title.toLowerCase().includes(searchQuery.toLowerCase())
+              );
+
+              return {
+                ...folder,
+                children: filteredChildren
+              };
+            }
+
+            // For non-folder items, check if they match the search
+            return folder.title.toLowerCase().includes(searchQuery.toLowerCase()) ? folder : undefined;
+          })
+          .filter((item): item is SidebarItem => item !== undefined); // Type-safe filter
+      }
+    }
+    
+    // Apply meeting-specific filters
+    return sidebarItems.map((folder) => {
+      if (folder.type === 'folder' && folder.id === 'meetings') {
+        let filteredChildren = folder.children || [];
+        
+        // Apply meeting title search/filter with wildcard support
+        if (meetingSearchQuery.trim()) {
+          filteredChildren = filteredChildren.filter((item) => 
+            matchesWildcard(item.title, meetingSearchQuery)
+          );
+        }
+        
+        // Filter out meetings without audio if hideNoAudioMeetings is enabled
+        if (hideNoAudioMeetings) {
+          filteredChildren = filteredChildren.filter((item) => {
+            const meeting = meetings.find((m: CurrentMeeting) => m.id === item.id);
+            return meeting?.hasAudio !== false;
+          });
+        }
+
+        return {
+          ...folder,
+          children: filteredChildren
+        };
+      }
+      
+      return folder;
+    });
+  }, [sidebarItems, searchQuery, searchResults, meetingSearchQuery, hideNoAudioMeetings, meetings, matchesWildcard]);
 
 
-  const handleDelete = async (itemId: string) => {
-    console.log('Deleting item:', itemId);
-    const payload = {
-      meetingId: itemId
-    };
+  const handleDelete = async (itemId: string, deleteAllData: boolean) => {
+    console.log('Deleting item:', itemId, 'deleteAllData:', deleteAllData);
 
     try {
       const { invoke } = await import('@tauri-apps/api/core');
-      await invoke('api_delete_meeting', {
-        meetingId: itemId,
-      });
-      console.log('Meeting deleted successfully');
-      const updatedMeetings = meetings.filter((m: CurrentMeeting) => m.id !== itemId);
-      setMeetings(updatedMeetings);
+      
+      if (deleteAllData) {
+        // Delete everything - meeting record, transcripts, and audio
+        await invoke('api_delete_meeting', {
+          meetingId: itemId,
+        });
+        console.log('Meeting deleted completely');
+        const updatedMeetings = meetings.filter((m: CurrentMeeting) => m.id !== itemId);
+        setMeetings(updatedMeetings);
 
-      // Track meeting deletion
-      Analytics.trackMeetingDeleted(itemId);
+        // Track meeting deletion
+        Analytics.trackMeetingDeleted(itemId);
 
-      // Show success toast
-      toast.success("Meeting deleted successfully", {
-        description: "All associated data has been removed"
-      });
+        // Show success toast
+        toast.success("Meeting deleted successfully", {
+          description: "All associated data has been removed"
+        });
 
-      // If deleting the active meeting, navigate to home
-      if (currentMeeting?.id === itemId) {
-        setCurrentMeeting({ id: 'intro-call', title: '+ New Call' });
-        router.push('/');
+        // If deleting the active meeting, navigate to home
+        if (currentMeeting?.id === itemId) {
+          setCurrentMeeting({ id: 'intro-call', title: '+ New Call' });
+          router.push('/');
+        }
+      } else {
+        // Delete only the audio file, keep meeting record and transcripts
+        await invoke('api_delete_meeting_audio', {
+          meetingId: itemId,
+        });
+        console.log('Meeting audio deleted');
+        
+        // Update meeting state to reflect no audio
+        const updatedMeetings = meetings.map((m: CurrentMeeting) => 
+          m.id === itemId ? { ...m, hasAudio: false } : m
+        );
+        setMeetings(updatedMeetings);
+
+        // Show success toast
+        toast.success("Audio file deleted", {
+          description: "The meeting record and transcripts have been preserved"
+        });
       }
     } catch (error) {
       console.error('Failed to delete meeting:', error);
-      toast.error("Failed to delete meeting", {
+      toast.error("Failed to delete", {
         description: error instanceof Error ? error.message : String(error)
       });
     }
   };
 
-  const handleDeleteConfirm = () => {
+  const handleDeleteConfirm = (deleteAllData: boolean) => {
     if (deleteModalState.itemId) {
-      handleDelete(deleteModalState.itemId);
+      handleDelete(deleteModalState.itemId, deleteAllData);
     }
-    setDeleteModalState({ isOpen: false, itemId: null });
+    setDeleteModalState({ isOpen: false, itemId: null, hasAudioFile: true });
   };
 
   // Handle modal editing of meeting names
@@ -610,30 +680,69 @@ const Sidebar: React.FC = () => {
                   </div>
                 )}
                 <span className="flex-1 break-words">{item.title}</span>
-                {isMeetingItem && (
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleEditStart(item.id, item.title);
-                      }}
-                      className="hover:text-blue-600 p-1 rounded-md hover:bg-blue-50 flex-shrink-0"
-                      aria-label="Edit meeting title"
-                    >
-                      <Pencil className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setDeleteModalState({ isOpen: true, itemId: item.id });
-                      }}
-                      className="hover:text-red-600 p-1 rounded-md hover:bg-red-50 flex-shrink-0"
-                      aria-label="Delete meeting"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                )}
+                {isMeetingItem && (() => {
+                  const meeting = meetings.find((m: CurrentMeeting) => m.id === item.id);
+                  const hasAudio = meeting?.hasAudio !== false;
+                  
+                  return (
+                    <>
+                      {!hasAudio && (
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <div className="flex-shrink-0 flex items-center justify-center w-5 h-5 rounded-full mr-1 bg-yellow-100">
+                                <span className="text-yellow-600 text-xs">⚠</span>
+                              </div>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p>No audio recording</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      )}
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleEditStart(item.id, item.title);
+                          }}
+                          className="hover:text-blue-600 p-1 rounded-md hover:bg-blue-50 flex-shrink-0"
+                          aria-label="Edit meeting title"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            
+                            // Check if meeting has audio file
+                            let hasAudioFile = true;
+                            try {
+                              const meeting = meetings.find((m: CurrentMeeting) => m.id === item.id);
+                              if (meeting?.folder_path) {
+                                const audioPath = await invoke<string | null>('get_meeting_audio_path', {
+                                  meetingFolder: meeting.folder_path
+                                });
+                                hasAudioFile = audioPath !== null;
+                              } else {
+                                hasAudioFile = false;
+                              }
+                            } catch (error) {
+                              console.error('Error checking for audio file:', error);
+                              hasAudioFile = false;
+                            }
+                            
+                            setDeleteModalState({ isOpen: true, itemId: item.id, hasAudioFile });
+                          }}
+                          className="hover:text-red-600 p-1 rounded-md hover:bg-red-50 flex-shrink-0"
+                          aria-label="Delete meeting"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
 
               {/* Show transcript match snippet if available */}
@@ -706,6 +815,42 @@ const Sidebar: React.FC = () => {
                       </InputGroupAddon>
                     }
                   </InputGroup>
+                </div>
+                
+                {/* Meeting Filter Section */}
+                <div className="space-y-2 mb-2">
+                  <div className="relative">
+                    <input
+                      type="text"
+                      placeholder="Filter meetings..."
+                      value={meetingSearchQuery}
+                      onChange={(e) => setMeetingSearchQuery(e.target.value)}
+                      className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-transparent"
+                    />
+                    {meetingSearchQuery && (
+                      <button
+                        onClick={() => setMeetingSearchQuery('')}
+                        className="absolute right-2 top-1/2 transform -translate-y-1/2 p-0.5 hover:bg-gray-200 rounded-full"
+                      >
+                        <X className="w-3 h-3 text-gray-500" />
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex items-center space-x-2 text-xs">
+                    <input
+                      type="checkbox"
+                      id="hideNoAudio"
+                      checked={hideNoAudioMeetings}
+                      onChange={(e) => setHideNoAudioMeetings(e.target.checked)}
+                      className="h-3 w-3 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                    />
+                    <label htmlFor="hideNoAudio" className="text-gray-600 cursor-pointer select-none">
+                      Hide meetings without recordings
+                    </label>
+                  </div>
+                  {meetingSearchQuery && (
+                    <p className="text-xs text-gray-400 italic">Tip: Use * for wildcards</p>
+                  )}
                 </div>
               </div>
             )}
@@ -814,7 +959,8 @@ const Sidebar: React.FC = () => {
         isOpen={deleteModalState.isOpen}
         text="Are you sure you want to delete this meeting? This action cannot be undone."
         onConfirm={handleDeleteConfirm}
-        onCancel={() => setDeleteModalState({ isOpen: false, itemId: null })}
+        onCancel={() => setDeleteModalState({ isOpen: false, itemId: null, hasAudioFile: true })}
+        hasAudioFile={deleteModalState.hasAudioFile}
       />
 
       {/* Edit Meeting Title Modal */}

@@ -69,6 +69,8 @@ interface ConfigContextType {
   // Summary configuration
   isAutoSummary: boolean;
   toggleIsAutoSummary: (checked: boolean) => void;
+  autoUpdateMeetingName: boolean;
+  toggleAutoUpdateMeetingName: (checked: boolean) => void;
 
   // Preference settings (lazy loaded)
   notificationSettings: NotificationSettings | null;
@@ -122,6 +124,14 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   const [isAutoSummary, setisAutoSummary] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('isAutoSummary');
+      return saved !== null ? saved === 'true' : false
+    }
+    return false;
+  });
+
+  const [autoUpdateMeetingName, setAutoUpdateMeetingName] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('autoUpdateMeetingName');
       return saved !== null ? saved === 'true' : false
     }
     return false;
@@ -343,6 +353,13 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  const toggleAutoUpdateMeetingName = useCallback((checked: boolean) => {
+    setAutoUpdateMeetingName(checked);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('autoUpdateMeetingName', checked.toString());
+    }
+  }, [])
+
   // Lazy load preference settings (only loads if not already cached)
   const loadPreferences = useCallback(async () => {
     // If already loaded, don't reload
@@ -408,6 +425,8 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     setModelConfig,
     isAutoSummary,
     toggleIsAutoSummary,
+    autoUpdateMeetingName,
+    toggleAutoUpdateMeetingName,
     transcriptModelConfig,
     setTranscriptModelConfig,
     selectedDevices,
@@ -428,6 +447,8 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     modelConfig,
     isAutoSummary,
     toggleIsAutoSummary,
+    autoUpdateMeetingName,
+    toggleAutoUpdateMeetingName,
     transcriptModelConfig,
     selectedDevices,
     selectedLanguage,

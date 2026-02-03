@@ -17,6 +17,8 @@ interface SidebarItem {
 export interface CurrentMeeting {
   id: string;
   title: string;
+  hasAudio?: boolean;
+  folder_path?: string;
 }
 
 // Search result type for transcript search
@@ -86,12 +88,36 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   const fetchMeetings = React.useCallback(async () => {
     if (serverAddress) {
       try {
-        const meetings = await invoke('api_get_meetings') as Array<{ id: string, title: string }>;
-        const transformedMeetings = meetings.map((meeting: any) => ({
-          id: meeting.id,
-          title: meeting.title
+        const meetings = await invoke('api_get_meetings') as Array<{ id: string, title: string, folder_path?: string }>;
+        
+        // Check audio availability for each meeting
+        const meetingsWithAudio = await Promise.all(meetings.map(async (meeting: any) => {
+          let hasAudio = false;
+          if (meeting.folder_path) {
+            try {
+              const audioPath = await invoke<string | null>('get_meeting_audio_path', {
+                meetingFolder: meeting.folder_path
+              });
+              hasAudio = audioPath !== null;
+            } catch (error) {
+              console.warn(`Warning checking audio for meeting ${meeting.id}:`, error);
+              // If there's an error checking, assume audio doesn't exist
+              hasAudio = false;
+            }
+          } else {
+            // If no folder_path, assume no audio
+            hasAudio = false;
+          }
+          
+          return {
+            id: meeting.id,
+            title: meeting.title,
+            folder_path: meeting.folder_path,
+            hasAudio
+          };
         }));
-        setMeetings(transformedMeetings);
+        
+        setMeetings(meetingsWithAudio);
         Analytics.trackBackendConnection(true);
       } catch (error) {
         console.error('Error fetching meetings:', error);

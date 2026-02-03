@@ -20,7 +20,7 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
     ollamaEndpoint: null
   });
 
-  const { isAutoSummary, toggleIsAutoSummary } = useConfig();
+  const { isAutoSummary, toggleIsAutoSummary, autoUpdateMeetingName, toggleAutoUpdateMeetingName } = useConfig();
 
   // Reusable fetch function
   const fetchModelConfig = useCallback(async () => {
@@ -130,6 +130,16 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
             <p className="text-sm text-gray-600">Auto Generating summary after meeting completion(Stopping)</p>
           </div>
           <Switch checked={isAutoSummary} onCheckedChange={toggleIsAutoSummary} />
+        </div>
+      </div>
+
+      <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Auto Update Meeting Name</h3>
+            <p className="text-sm text-gray-600">Automatically update the meeting name when generating a summary</p>
+          </div>
+          <Switch checked={autoUpdateMeetingName} onCheckedChange={toggleAutoUpdateMeetingName} />
         </div>
       </div>
 

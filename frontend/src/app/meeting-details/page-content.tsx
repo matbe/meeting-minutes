@@ -460,6 +460,7 @@ export default function PageContent({
           // Retranscription props
           meetingId={meeting.id}
           meetingFolderPath={meeting.folder_path}
+          hasAudioFile={!!audioFilePath}
         />
         <SummaryPanel
           meeting={meeting}

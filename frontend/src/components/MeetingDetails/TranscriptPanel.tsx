@@ -43,6 +43,7 @@ interface TranscriptPanelProps {
   // Retranscription props
   meetingId?: string;
   meetingFolderPath?: string | null;
+  hasAudioFile?: boolean;
 }
 
 export function TranscriptPanel({
@@ -71,6 +72,7 @@ export function TranscriptPanel({
   isEnhancing = false,
   meetingId,
   meetingFolderPath,
+  hasAudioFile = true,
 }: TranscriptPanelProps) {
   // Convert transcripts to segments if pagination is not used but we want virtualization
   const convertedSegments = useMemo(() => {
@@ -98,6 +100,7 @@ export function TranscriptPanel({
           onCopyTranscript={onCopyTranscript}
           onOpenMeetingFolder={onOpenMeetingFolder}
           meetingId={meetingId}
+          hasAudioFile={hasAudioFile}
           meetingFolderPath={meetingFolderPath}
         />
       </div>

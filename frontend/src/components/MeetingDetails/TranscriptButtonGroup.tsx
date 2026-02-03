@@ -14,6 +14,7 @@ interface TranscriptButtonGroupProps {
   onOpenMeetingFolder: () => Promise<void>;
   meetingId?: string;
   meetingFolderPath?: string | null;
+  hasAudioFile?: boolean;
 }
 
 
@@ -23,6 +24,7 @@ export function TranscriptButtonGroup({
   onOpenMeetingFolder,
   meetingId,
   meetingFolderPath,
+  hasAudioFile = true,
 }: TranscriptButtonGroupProps) {
   const [showRetranscribeDialog, setShowRetranscribeDialog] = useState(false);
 
@@ -71,7 +73,8 @@ export function TranscriptButtonGroup({
               Analytics.trackButtonClick('retranscribe', 'meeting_details');
               setShowRetranscribeDialog(true);
             }}
-            title="Retranscribe with different language"
+            disabled={!hasAudioFile}
+            title={hasAudioFile ? "Retranscribe with different language" : "No audio file available"}
           >
             <RefreshCw className="xl:mr-2" size={18} />
             <span className="hidden lg:inline">Retranscribe</span>
@@ -79,7 +82,7 @@ export function TranscriptButtonGroup({
         )}
       </ButtonGroup>
 
-      {meetingId && meetingFolderPath && (
+      {meetingId && meetingFolderPath && hasAudioFile && (
         <RetranscribeDialog
           open={showRetranscribeDialog}
           onOpenChange={setShowRetranscribeDialog}

@@ -20,6 +20,8 @@ interface EnhanceButtonProps {
   isEnhancing?: boolean;
   /** Optional className for additional styling */
   className?: string;
+  /** Whether audio file is available */
+  hasAudioFile?: boolean;
 }
 
 export function EnhanceButton({
@@ -28,14 +30,18 @@ export function EnhanceButton({
   disabled = false,
   isEnhancing = false,
   className = '',
+  hasAudioFile = true,
 }: EnhanceButtonProps) {
+  const isDisabled = disabled || isEnhancing || !hasAudioFile;
+  
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button
           className={`flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 border border-gray-200 rounded-md text-sm text-gray-600 hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${className}`}
           type="button"
-          disabled={disabled || isEnhancing}
+          disabled={isDisabled}
+          title={!hasAudioFile ? "No audio file available" : undefined}
         >
           {isEnhancing ? (
             <>
@@ -55,12 +61,14 @@ export function EnhanceButton({
         <DropdownMenuItem
           onClick={onFullEnhance}
           className="flex items-center gap-2 cursor-pointer"
-          disabled={isEnhancing}
+          disabled={isDisabled}
         >
           <RefreshCw className="w-4 h-4 text-gray-500" />
           <div className="flex flex-col">
             <span className="font-medium">Full enhance</span>
-            <span className="text-xs text-gray-500">Re-transcribe with speakers</span>
+            <span className="text-xs text-gray-500">
+              {hasAudioFile ? "Re-transcribe with speakers" : "No audio available"}
+            </span>
           </div>
         </DropdownMenuItem>
         <DropdownMenuItem
