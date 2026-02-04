@@ -386,3 +386,80 @@ pub async fn export_vocabulary<R: Runtime>(
             format!("Failed to export vocabulary: {}", e)
         })
 }
+
+/// Apply vocabulary correction to all transcripts for a meeting and save to database
+/// This applies the corrected text to the database transcripts so:
+/// 1. The correction persists when the meeting is reopened
+/// 2. AI Summary uses the corrected terminology
+/// 3. No need to load vocabulary on every view mount
+#[tauri::command]
+pub async fn apply_vocabulary_correction_to_transcripts<R: Runtime>(
+    app: AppHandle<R>,
+    meeting_id: String,
+) -> Result<u32, String> {
+    use crate::vocabulary_correction::apply_vocabulary_corrections;
+    use crate::database::repositories::meeting::MeetingsRepository;
+    use crate::database::repositories::transcript::TranscriptsRepository;
+
+    log_info!("Applying vocabulary correction to transcripts for meeting: {}", meeting_id);
+
+    let state = app.state::<AppState>();
+    let pool = state.db_manager.pool();
+
+    // 1. Get all enabled vocabulary entries
+    let vocab_entries = VocabularyRepository::get_all_enabled_entries(pool)
+        .await
+        .map_err(|e| {
+            log_error!("Failed to get vocabulary entries: {}", e);
+            format!("Failed to get vocabulary entries: {}", e)
+        })?;
+
+    if vocab_entries.is_empty() {
+        log_info!("No vocabulary entries to apply");
+        return Ok(0);
+    }
+
+    // 2. Get all transcripts for this meeting
+    let meeting = MeetingsRepository::get_meeting(pool, &meeting_id)
+        .await
+        .map_err(|e| {
+            log_error!("Failed to get meeting: {}", e);
+            format!("Failed to get meeting: {}", e)
+        })?
+        .ok_or("Meeting not found")?;
+
+    if meeting.transcripts.is_empty() {
+        log_info!("No transcripts to correct");
+        return Ok(0);
+    }
+
+    // 3. Apply vocabulary corrections to each transcript
+    let mut corrections = Vec::new();
+    for transcript in meeting.transcripts {
+        let corrected_text = apply_vocabulary_corrections(&transcript.text, &vocab_entries);
+        
+        // Only store if text was actually corrected
+        if corrected_text != transcript.text {
+            let transcript_id = transcript.id.clone();
+            corrections.push((transcript_id.clone(), corrected_text));
+            log_info!("Vocabulary correction applied to transcript: {}", transcript_id);
+        }
+    }
+
+    // 4. Update all corrected transcripts in the database
+    if !corrections.is_empty() {
+        let count = TranscriptsRepository::update_all_meeting_transcripts_text(pool, &meeting_id, corrections)
+            .await
+            .map_err(|e| {
+                log_error!("Failed to update transcripts: {}", e);
+                format!("Failed to update transcripts: {}", e)
+            })?;
+        
+        log_info!("✅ Applied vocabulary correction to {} transcripts", count);
+        Ok(count)
+    } else {
+        log_info!("No vocabulary corrections needed");
+        Ok(0)
+    }
+}
+

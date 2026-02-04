@@ -40,6 +40,7 @@ pub mod api;
 pub mod audio;
 pub mod console_utils;
 pub mod database;
+pub mod vocabulary_correction;
 pub mod notifications;
 pub mod ollama;
 pub mod onboarding;
@@ -722,6 +723,7 @@ pub fn run() {
             database::vocabulary_commands::get_vocabulary_for_correction,
             database::vocabulary_commands::import_vocabulary,
             database::vocabulary_commands::export_vocabulary,
+            database::vocabulary_commands::apply_vocabulary_correction_to_transcripts,
             // Retranscription commands
             audio::retranscription::start_retranscription_command,
             audio::retranscription::cancel_retranscription_command,
