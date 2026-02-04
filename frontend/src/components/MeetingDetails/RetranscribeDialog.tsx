@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { RefreshCw, Globe, Loader2, AlertCircle, CheckCircle2, X, Cpu } from 'lucide-react';
+import { RefreshCw, Globe, Loader2, AlertCircle, CheckCircle2, X, Cpu, Zap } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -16,6 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../ui/select';
+import { ButtonGroup } from '../ui/button-group';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { toast } from 'sonner';
@@ -117,12 +118,19 @@ export function RetranscribeDialog({
   const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
   const [selectedModelKey, setSelectedModelKey] = useState<string>(''); // Format: "provider:model"
   const [loadingModels, setLoadingModels] = useState(false);
+  const [transcriptionMethod, setTranscriptionMethod] = useState<'standard' | 'nutwhisper'>('standard');
 
   // Helper to get selected model details
   const getSelectedModel = (): ModelOption | undefined => {
     if (!selectedModelKey) return undefined;
     const [provider, name] = selectedModelKey.split(':');
     return availableModels.find(m => m.provider === provider && m.name === name);
+  };
+
+  // Check if selected model is Whisper
+  const isWhisperModelSelected = (): boolean => {
+    const selectedModel = getSelectedModel();
+    return selectedModel?.provider === 'whisper';
   };
 
   // Reset state and fetch models when dialog opens
@@ -267,6 +275,7 @@ export function RetranscribeDialog({
         language: selectedLang === 'auto' ? null : selectedLang,
         model: selectedModelDetails?.name || null,
         provider: selectedModelDetails?.provider || null,
+        useNutWhisper: transcriptionMethod === 'nutwhisper',
       });
     } catch (err: any) {
       setIsProcessing(false);
@@ -392,6 +401,36 @@ export function RetranscribeDialog({
               </Select>
               <p className="text-xs text-muted-foreground">
                 Choose a transcription model
+              </p>
+            </div>
+          )}
+
+          {!isProcessing && !error && isWhisperModelSelected() && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Zap className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm font-medium">Method</span>
+              </div>
+              <ButtonGroup className="w-full">
+                <Button
+                  variant={transcriptionMethod === 'standard' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setTranscriptionMethod('standard')}
+                  className="flex-1"
+                >
+                  Standard
+                </Button>
+                <Button
+                  variant={transcriptionMethod === 'nutwhisper' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setTranscriptionMethod('nutwhisper')}
+                  className="flex-1"
+                >
+                  NutWhisper
+                </Button>
+              </ButtonGroup>
+              <p className="text-xs text-muted-foreground">
+                Standard uses batch processing, NutWhisper uses streaming processing for potentially faster results
               </p>
             </div>
           )}
