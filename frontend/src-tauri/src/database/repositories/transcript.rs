@@ -143,4 +143,50 @@ impl TranscriptsRepository {
             None => transcript.chars().take(200).collect(), // Fallback to the start of the transcript
         }
     }
+
+    /// Updates a transcript segment with corrected text
+    /// This is used for vocabulary correction where the original text is replaced with corrected text
+    pub async fn update_transcript_text(
+        pool: &SqlitePool,
+        transcript_id: &str,
+        corrected_text: &str,
+    ) -> Result<(), SqlxError> {
+        sqlx::query(
+            "UPDATE transcripts SET transcript = ? WHERE id = ?",
+        )
+        .bind(corrected_text)
+        .bind(transcript_id)
+        .execute(pool)
+        .await?;
+
+        info!("Updated transcript {} with corrected text", transcript_id);
+        Ok(())
+    }
+
+    /// Updates all transcripts for a meeting with corrected text
+    /// Returns the number of transcripts updated
+    pub async fn update_all_meeting_transcripts_text(
+        pool: &SqlitePool,
+        meeting_id: &str,
+        text_corrections: Vec<(String, String)>, // (transcript_id, corrected_text)
+    ) -> Result<u32, SqlxError> {
+        let mut conn = pool.acquire().await?;
+        let mut transaction = conn.begin().await?;
+
+        let mut count = 0;
+        for (transcript_id, corrected_text) in text_corrections {
+            sqlx::query(
+                "UPDATE transcripts SET transcript = ? WHERE id = ?",
+            )
+            .bind(&corrected_text)
+            .bind(&transcript_id)
+            .execute(&mut *transaction)
+            .await?;
+            count += 1;
+        }
+
+        transaction.commit().await?;
+        info!("Updated {} transcripts for meeting {}", count, meeting_id);
+        Ok(count)
+    }
 }

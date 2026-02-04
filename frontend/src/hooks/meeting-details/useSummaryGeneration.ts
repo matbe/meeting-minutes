@@ -20,6 +20,7 @@ interface UseSummaryGenerationProps {
   updateMeetingTitle: (title: string) => void;
   setAiSummary: (summary: Summary | null) => void;
   onOpenModelSettings?: () => void;
+  autoUpdateMeetingName?: boolean;
 }
 
 export function useSummaryGeneration({
@@ -32,6 +33,7 @@ export function useSummaryGeneration({
   updateMeetingTitle,
   setAiSummary,
   onOpenModelSettings,
+  autoUpdateMeetingName = true,
 }: UseSummaryGenerationProps) {
   const [summaryStatus, setSummaryStatus] = useState<SummaryStatus>('idle');
   const [summaryError, setSummaryError] = useState<string | null>(null);
@@ -221,10 +223,13 @@ export function useSummaryGeneration({
         if (pollingResult.status === 'completed' && pollingResult.data) {
           console.log('Summary generation completed:', pollingResult.data);
 
-          // Update meeting title if available
+          // Update meeting title if available AND if auto-update is enabled
           const meetingName = pollingResult.data.MeetingName || pollingResult.meetingName;
-          if (meetingName) {
+          if (meetingName && autoUpdateMeetingName) {
+            console.log('✅ Auto update meeting name enabled, updating to:', meetingName);
             updateMeetingTitle(meetingName);
+          } else if (meetingName && !autoUpdateMeetingName) {
+            console.log('⏸️  Auto update meeting name disabled, keeping original title');
           }
 
           // Check if backend returned markdown format (new flow)

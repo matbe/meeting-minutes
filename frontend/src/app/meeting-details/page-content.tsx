@@ -78,8 +78,8 @@ export default function PageContent({
   // Sidebar context
   const { serverAddress } = useSidebar();
 
-  // Get model config from ConfigContext
-  const { modelConfig, setModelConfig } = useConfig();
+  // Get model config and auto-update setting from ConfigContext
+  const { modelConfig, setModelConfig, autoUpdateMeetingName } = useConfig();
 
   // Custom hooks
   const meetingData = useMeetingData({ meeting, summaryData, onMeetingUpdated });
@@ -118,6 +118,7 @@ export default function PageContent({
     updateMeetingTitle: meetingData.updateMeetingTitle,
     setAiSummary: meetingData.setAiSummary,
     onOpenModelSettings: handleOpenModelSettings,
+    autoUpdateMeetingName: autoUpdateMeetingName,
   });
 
   const copyOperations = useCopyOperations({
