@@ -94,6 +94,12 @@ console.log = (...args) => {
 // Detect and output the feature
 const feature = detectGPU();
 
+if (feature) {
+  console.log(`⚠️  WARNING: GPU builds are NOT portable! The resulting binary will`);
+  console.log(`   REQUIRE ${feature} libraries on the target machine.`);
+  console.log(`   For a portable build, use: pnpm run tauri:build:cpu`);
+}
+
 // Restore console.log
 console.log = originalLog;
 

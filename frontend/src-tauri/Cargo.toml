@@ -36,11 +36,17 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 #   .\build-gpu.ps1 (Windows PowerShell)
 #
 [features]
-#default = ["platform-default"]  # Automatically enables best backend per platform
-default = ["cuda"]  # Automatically enables best backend per platform
+# CPU-only by default — portable binary that works on ANY machine.
+# To build with GPU acceleration, pass explicit features:
+#   cargo build --release --features cuda     (NVIDIA GPU - requires CUDA on target machine)
+#   cargo build --release --features vulkan   (AMD/Intel GPU - requires Vulkan on target machine)
+default = []
 
 # Platform-appropriate defaults - see target-specific dependencies below
 platform-default = []
+
+# GPU support - enables runtime fallback from GPU to CPU
+gpu = ["cuda", "vulkan", "metal", "coreml"]
 
 # Manual GPU acceleration options (for power users to override defaults)
 metal = ["whisper-rs/metal"]       # macOS: Apple Metal GPU (Auto-enabled on macOS)
@@ -173,14 +179,15 @@ futures-channel = "0.3.31"
 whisper-rs = { version = "0.13.2", features = ["raw-api", "metal", "coreml"] }
 
 # Windows-specific dependencies
-# Default: CPU-only build (no BLAS)
-# Users can enable features manually:
-#   --features cuda     (NVIDIA GPUs)
-#   --features vulkan   (AMD/Intel GPUs)
+# Default: CPU-only build (portable — works on ANY machine)
+# Users can enable GPU features at build time:
+#   --features cuda     (NVIDIA GPUs — binary will REQUIRE cublas DLLs at runtime)
+#   --features vulkan   (AMD/Intel GPUs — binary will REQUIRE Vulkan at runtime)
 #   --features openblas (OpenBLAS optimization, requires BLAS_INCLUDE_DIRS)
 [target.'cfg(target_os = "windows")'.dependencies]
-whisper-rs = { version = "0.13.2", features = ["raw-api", "cuda"] }
+whisper-rs = { version = "0.13.2", features = ["raw-api"] }
 futures-channel = "0.3.31"
+winapi = { version = "0.3", features = ["libloaderapi"] }
 
 # Linux-specific dependencies
 # Default: CPU-only build (no BLAS)
