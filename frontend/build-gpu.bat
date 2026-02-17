@@ -75,9 +75,9 @@ if exist "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxi
     set "PATH=C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64;%PATH%"
 )
 
-REM Set CUDA arch
-set "CMAKE_CUDA_ARCHITECTURES=75;86;89;90;100"
-set "CUDAARCHS=75;86;89;90;100"
+REM Set CUDA arch (CUDA 12+ minimum: 75=Turing, 80/86=Ampere, 89=Ada, 90=Hopper, 100/120=Blackwell/5090)
+set "CMAKE_CUDA_ARCHITECTURES=75;80;86;89;90;100;120"
+set "CUDAARCHS=75;80;86;89;90;100;120"
 set "CMAKE_CUDA_STANDARD=17"
 set "CMAKE_CXX_STANDARD=17"
 set "CUDAFLAGS=-std=c++17

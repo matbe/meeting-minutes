@@ -175,7 +175,7 @@ impl WhisperEngine {
             ("tiny", "ggml-tiny.bin", 39, "Decent", "Very Fast", "Fastest processing, good for real-time use"),
             ("base", "ggml-base.bin", 142, "Good", "Fast", "Good balance of speed and accuracy"),
             ("small", "ggml-small.bin", 466, "Good", "Medium", "Better accuracy, moderate speed"),
-            ("medium", "ggml-medium.bin", 1420, "High", "Slow", "High accuracy for professional use"),
+            ("medium", "ggml-medium.bin", 1420, "High", "Medium", "High accuracy for professional use"),
             ("large-v3-turbo", "ggml-large-v3-turbo.bin", 809, "High", "Medium", "Best accuracy with improved speed"),
             ("large-v3", "ggml-large-v3.bin", 3174, "High", "Slow", "Best accuracy, latest large model"),
 

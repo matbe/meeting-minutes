@@ -33,6 +33,12 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
     const [selectedParakeetModel, setSelectedParakeetModel] = useState<string>(transcriptModelConfig.provider === 'parakeet' ? transcriptModelConfig.model : 'parakeet-tdt-0.6b-v3-int8');
     const [whisperProvider, setWhisperProvider] = useState<WhisperProvider>(transcriptModelConfig.whisperProvider || 'Standard');
     const [isSettingProvider, setIsSettingProvider] = useState<boolean>(false);
+    const [uiProvider, setUiProvider] = useState<TranscriptModelProps['provider']>(transcriptModelConfig.provider);
+
+    // Sync uiProvider when backend config changes (e.g., after model selection or initial load)
+    useEffect(() => {
+        setUiProvider(transcriptModelConfig.provider);
+    }, [transcriptModelConfig.provider]);
 
     // Load current whisper provider on mount
     useEffect(() => {
@@ -84,8 +90,8 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
         }
     };
     const modelOptions = {
-        localWhisper: [selectedWhisperModel],
-        parakeet: [selectedParakeetModel],
+        localWhisper: [], // Model selection handled by ModelManager component
+        parakeet: [], // Model selection handled by ParakeetModelManager component
         deepgram: ['nova-2-phonecall'],
         elevenLabs: ['eleven_multilingual_v2'],
         groq: ['llama-3.3-70b-versatile'],
@@ -101,30 +107,30 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
     };
 
     const handleWhisperModelSelect = (modelName: string) => {
-        setSelectedWhisperModel(modelName);
-        if (transcriptModelConfig.provider === 'localWhisper') {
-            setTranscriptModelConfig({
-                ...transcriptModelConfig,
-                model: modelName
-            });
-            // Close modal after selection
-            if (onModelSelect) {
-                onModelSelect();
-            }
+        // Always update config when model is selected, regardless of current provider
+        // This ensures the model is set when user switches back
+        setTranscriptModelConfig({
+            ...transcriptModelConfig,
+            provider: 'localWhisper', // Ensure provider is set correctly
+            model: modelName
+        });
+        // Close modal after selection
+        if (onModelSelect) {
+            onModelSelect();
         }
     };
 
     const handleParakeetModelSelect = (modelName: string) => {
-        setSelectedParakeetModel(modelName);
-        if (transcriptModelConfig.provider === 'parakeet') {
-            setTranscriptModelConfig({
-                ...transcriptModelConfig,
-                model: modelName
-            });
-            // Close modal after selection
-            if (onModelSelect) {
-                onModelSelect();
-            }
+        // Always update config when model is selected, regardless of current provider
+        // This ensures the model is set when user switches back
+        setTranscriptModelConfig({
+            ...transcriptModelConfig,
+            provider: 'parakeet', // Ensure provider is set correctly
+            model: modelName
+        });
+        // Close modal after selection
+        if (onModelSelect) {
+            onModelSelect();
         }
     };
 
@@ -141,12 +147,11 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                         </Label>
                         <div className="flex space-x-2 mx-1">
                             <Select
-                                value={transcriptModelConfig.provider}
+                                value={uiProvider}
                                 onValueChange={(value) => {
                                     const provider = value as TranscriptModelProps['provider'];
-                                    const newModel = provider === 'localWhisper' ? selectedWhisperModel : modelOptions[provider][0];
-                                    setTranscriptModelConfig({ ...transcriptModelConfig, provider, model: newModel });
-                                    if (provider !== 'localWhisper') {
+                                    setUiProvider(provider);
+                                    if (provider !== 'localWhisper' && provider !== 'parakeet') {
                                         fetchApiKey(provider);
                                     }
                                 }}
@@ -164,19 +169,19 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 </SelectContent>
                             </Select>
 
-                            {transcriptModelConfig.provider !== 'localWhisper' && transcriptModelConfig.provider !== 'parakeet' && (
+                            {uiProvider !== 'localWhisper' && uiProvider !== 'parakeet' && (
                                 <Select
                                     value={transcriptModelConfig.model}
                                     onValueChange={(value) => {
                                         const model = value as TranscriptModelProps['model'];
-                                        setTranscriptModelConfig({ ...transcriptModelConfig, model });
+                                        setTranscriptModelConfig({ ...transcriptModelConfig, provider: uiProvider, model });
                                     }}
                                 >
                                     <SelectTrigger className='focus:ring-1 focus:ring-blue-500 focus:border-blue-500'>
                                         <SelectValue placeholder="Select model" />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        {modelOptions[transcriptModelConfig.provider].map((model) => (
+                                        {modelOptions[uiProvider].map((model) => (
                                             <SelectItem key={model} value={model}>{model}</SelectItem>
                                         ))}
                                     </SelectContent>
@@ -186,7 +191,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                         </div>
                     </div>
 
-                    {transcriptModelConfig.provider === 'localWhisper' && (
+                    {uiProvider === 'localWhisper' && (
                         <div className="mt-6 space-y-6">
                             {/* Whisper Provider Selection */}
                             <div className="space-y-3">
@@ -267,17 +272,17 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
 
                             {/* Model Manager */}
                             <ModelManager
-                                selectedModel={selectedWhisperModel}
+                                selectedModel={transcriptModelConfig.provider === 'localWhisper' ? transcriptModelConfig.model : undefined}
                                 onModelSelect={handleWhisperModelSelect}
                                 autoSave={true}
                             />
                         </div>
                     )}
 
-                    {transcriptModelConfig.provider === 'parakeet' && (
+                    {uiProvider === 'parakeet' && (
                         <div className="mt-6">
                             <ParakeetModelManager
-                                selectedModel={selectedParakeetModel}
+                                selectedModel={transcriptModelConfig.provider === 'parakeet' ? transcriptModelConfig.model : undefined}
                                 onModelSelect={handleParakeetModelSelect}
                                 autoSave={true}
                             />
@@ -333,7 +338,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                     )}
                 </div>
             </div>
-        </div>
+        </div >
     )
 }
 

@@ -97,7 +97,7 @@ fn download_and_extract_ffmpeg(
     // Download to temp file
     let temp_dir = std::env::temp_dir();
     let archive_filename = url.split('/').last().unwrap_or("ffmpeg-archive");
-    let archive_path = temp_dir.join(format!("ffmpeg-build-{}", archive_filename));
+    let archive_path = temp_dir.join(format!("ffmpeg-build-{}-{}", target, archive_filename));
 
     {
         let mut file = std::fs::File::create(&archive_path)
@@ -126,25 +126,25 @@ fn download_and_extract_ffmpeg(
 
 /// Get FFmpeg download URL for specific target triple
 fn get_ffmpeg_url_for_target(target: &str) -> Result<String, String> {
-    // Platform-specific URLs from official FFmpeg binary providers
+    // Platform-specific URLs from project's GitHub releases
     let url = if target.contains("windows") {
-        // Gyan.dev - Community FFmpeg builds for Windows
-        "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+        // Windows
+        "https://github.com/Zackriya-Solutions/ffmpeg-binaries/releases/download/0.0.1/ffmpeg-8.0.1-essentials_build.zip"
     } else if target.contains("apple") {
         if target.contains("aarch64") {
             // Apple Silicon (M1/M2/M3)
-            "https://www.osxexperts.net/ffmpeg80arm.zip"
+            "https://github.com/Zackriya-Solutions/ffmpeg-binaries/releases/download/0.0.1/ffmpeg80arm.zip"
         } else {
             // Intel Mac
-            "https://evermeet.cx/ffmpeg/getrelease/zip"
+            "https://github.com/Zackriya-Solutions/ffmpeg-binaries/releases/download/0.0.1/ffmpeg-8.0.1.zip"
         }
     } else if target.contains("linux") {
         if target.contains("aarch64") || target.contains("arm") {
             // Linux ARM64
-            "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-arm64-static.tar.xz"
+            "https://github.com/Zackriya-Solutions/ffmpeg-binaries/releases/download/0.0.1/ffmpeg-release-arm64-static.tar.xz"
         } else {
             // Linux x86_64
-            "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz"
+            "https://github.com/Zackriya-Solutions/ffmpeg-binaries/releases/download/0.0.1/ffmpeg-release-amd64-static.tar.xz"
         }
     } else {
         return Err(format!("Unsupported target platform: {}", target));
@@ -159,7 +159,7 @@ fn extract_ffmpeg_from_archive(
     target: &str,
     output_path: &std::path::PathBuf,
 ) -> Result<(), String> {
-    let extract_dir = std::env::temp_dir().join("ffmpeg-extract");
+    let extract_dir = std::env::temp_dir().join(format!("ffmpeg-extract-{}", target));
 
     // Clean old extraction directory
     let _ = std::fs::remove_dir_all(&extract_dir);
@@ -222,9 +222,17 @@ fn extract_zip(
         let mut file = archive.by_index(i)
             .map_err(|e| format!("Failed to read ZIP entry {}: {}", i, e))?;
 
-        let outpath = extract_dir.join(file.name());
+        // Use enclosed_name() to prevent Zip Slip path traversal attacks
+        let outpath = match file.enclosed_name() {
+            Some(name) => extract_dir.join(name),
+            None => {
+                // Skip entries with path traversal sequences (e.g., "../")
+                println!("cargo:warning=⚠️  Skipping suspicious ZIP entry: {}", file.name());
+                continue;
+            }
+        };
 
-        if file.name().ends_with('/') {
+        if file.is_dir() {
             // Directory
             std::fs::create_dir_all(&outpath)
                 .map_err(|e| format!("Failed to create directory: {}", e))?;

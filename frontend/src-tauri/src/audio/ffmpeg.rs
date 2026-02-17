@@ -109,15 +109,6 @@ fn find_ffmpeg_path_internal() -> Option<PathBuf> {
     if let Ok(exe_path) = std::env::current_exe() {
         if let Some(exe_folder) = exe_path.parent() {
             debug!("Executable folder: {:?}", exe_folder);
-            let ffmpeg_in_exe_folder = exe_folder.join(EXECUTABLE_NAME);
-            if ffmpeg_in_exe_folder.exists() {
-                debug!(
-                    "Found ffmpeg in executable folder: {:?}",
-                    ffmpeg_in_exe_folder
-                );
-                return Some(ffmpeg_in_exe_folder);
-            }
-            debug!("ffmpeg not found in executable folder");
 
             // Platform-specific checks
             #[cfg(target_os = "macos")]

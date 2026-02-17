@@ -79,6 +79,12 @@ if "!GPU_AUTO!" == "true" (
 if "!GPU_CUDA!" == "true" (
     echo Building with NVIDIA CUDA support...
     echo WARNING: This binary will REQUIRE cublas DLLs on the target machine!
+    REM Set CUDA arch (CUDA 12+ minimum: 75=Turing, 80/86=Ampere, 89=Ada, 90=Hopper, 100/120=Blackwell/5090)
+    set "CMAKE_CUDA_ARCHITECTURES=75;80;86;89;90;100;120"
+    set "CUDAARCHS=75;80;86;89;90;100;120"
+    set "CMAKE_CUDA_STANDARD=17"
+    set "CMAKE_CXX_STANDARD=17"
+    set "CUDAFLAGS=-std=c++17
     call pnpm run tauri:build:cuda
     goto :build_done
 )
