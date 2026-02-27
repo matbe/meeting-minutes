@@ -1,11 +1,10 @@
 # Meetily Backend
 
-FastAPI backend for meeting transcription and analysis with **Docker distribution system** for easy deployment.
+FastAPI backend for meeting transcription and analysis.
 
 ## 📋 Table of Contents
 - [⚠️ Important Notes](#️-important-notes)
 - [🚀 Quick Start](#-quick-start)
-- [🐳 Docker Deployment (Recommended)](#-docker-deployment-recommended)
 - [💻 Native Development](#-native-development)
 - [🔧 Manual Installation](#-manual-installation)
 - [📚 API Documentation](#-api-documentation)
@@ -17,40 +16,24 @@ FastAPI backend for meeting transcription and analysis with **Docker distributio
 ## ⚠️ Important Notes
 
 ### Audio Processing Requirements
-When running in Docker containers, audio processing can drop chunks due to resource limitations:
+Ensure adequate system resources for audio processing:
 
-**Symptoms:**
+**Symptoms of insufficient resources:**
 - Log messages: "Dropped old audio chunk X due to queue overflow"
 - Missing or incomplete transcriptions
 - Processing delays
 
 **Prevention:**
-- Allocate **8GB+ RAM** to Docker containers
+- Allocate **8GB+ RAM** for the backend services
 - Ensure adequate CPU allocation
 - Use appropriate Whisper model size for your hardware
-- Monitor container resource usage
+- Monitor system resource usage
 
 ---
 
 ## 🚀 Quick Start
 
-Choose your preferred deployment method:
-
-### Option 1: Docker (Recommended - Easiest)
-```bash
-# Navigate to backend directory
-cd backend
-
-# Windows (PowerShell)
-.\build-docker.ps1 cpu
-.\run-docker.ps1 start -Interactive
-
-# macOS/Linux (Bash)
-./build-docker.sh cpu
-./run-docker.sh start --interactive
-```
-
-### Option 2: Native Development (Fastest Performance)
+### Native Development (Best Performance)
 ```bash
 # Navigate to backend directory
 cd backend
@@ -69,84 +52,6 @@ start_with_output.ps1
 - **Whisper Server**: http://localhost:8178
 - **Meeting App**: http://localhost:5167 (with API docs at `/docs`)
 
----
-
-## 🐳 Docker Deployment (Recommended)
-
-Docker provides the easiest setup with automatic dependency management, GPU detection, and cross-platform compatibility.
-
-### Prerequisites
-- Docker Desktop (Windows/Mac) or Docker Engine (Linux)
-- 8GB+ RAM allocated to Docker
-- For GPU: NVIDIA drivers + nvidia-container-toolkit
-
-### Windows (PowerShell)
-
-#### Basic Setup
-```powershell
-# Build images
-.\build-docker.ps1 cpu
-
-# Interactive setup (recommended for first-time users)
-.\run-docker.ps1 start -Interactive
-
-# Quick start with defaults
-.\run-docker.ps1 start -Detach
-```
-
-#### Advanced Configuration
-```powershell
-# GPU acceleration
-.\build-docker.ps1 gpu
-.\run-docker.ps1 start -Model large-v3 -Gpu -Language en -Detach
-
-# Custom ports and features
-.\run-docker.ps1 start -Port 8081 -AppPort 5168 -Translate -Diarize
-
-# Monitor services
-.\run-docker.ps1 logs -Service whisper -Follow
-.\run-docker.ps1 status
-```
-
-### macOS/Linux (Bash)
-
-#### Basic Setup
-```bash
-# Build images
-./build-docker.sh cpu
-
-# Interactive setup (recommended)
-./run-docker.sh start --interactive
-
-# Quick start with defaults
-./run-docker.sh start --detach
-```
-
-#### Advanced Configuration
-```bash
-# With specific model and language
-./run-docker.sh start --model base --language es --detach
-
-# View logs and status
-./run-docker.sh logs --service whisper --follow
-./run-docker.sh status
-
-# Database migration from existing installation
-./run-docker.sh setup-db --auto
-```
-
-### Interactive Setup Features
-
-The interactive mode guides you through:
-
-1. **Model Selection** - Choose from 20+ models with size/accuracy guidance
-2. **Language Settings** - Select from 40+ supported languages  
-3. **Port Configuration** - Automatic conflict detection and resolution
-4. **Database Setup** - Migrate from existing installations or start fresh
-5. **GPU Configuration** - Auto-detection and setup
-6. **Advanced Features** - Translation, diarization, progress display
-7. **Settings Persistence** - Saves preferences for future runs
-
 ### Model Size Guide
 
 | Model | Size | Accuracy | Speed | Best For |
@@ -156,17 +61,6 @@ The interactive mode guides you through:
 | small | ~244 MB | Better | Medium | Better accuracy needed |
 | medium | ~769 MB | High | Slow | High accuracy requirements |
 | large-v3 | ~1550 MB | Best | Slowest | Maximum accuracy |
-
-### Docker vs Native Comparison
-
-| Aspect | Docker | Native |
-|--------|--------|--------|
-| **Setup** | Easy (automated) | Manual (requires dependencies) |
-| **Performance** | Good (5-10% overhead) | Optimal (direct hardware) |
-| **GPU Support** | NVIDIA only | Full native support |
-| **Isolation** | Complete | Shared environment |
-| **Portability** | Universal | Platform-specific |
-| **Updates** | Container replacement | Manual updates |
 
 ---
 
@@ -228,24 +122,7 @@ The simplest and fastest way to get started is using the pre-built backend relea
 
 ✅ **Success Check:** The script will guide you through setup and start both Whisper server (port 8178) and Meeting app (port 5167) automatically.
 
-**📦 Option 2: Docker Setup (Alternative - Easier)**
-
-Docker handles all dependencies automatically:
-
-```powershell
-# Navigate to backend directory
-cd backend
-
-# Build and start (CPU version)
-.\build-docker.ps1 cpu
-.\run-docker.ps1 start -Interactive
-```
-
-**Prerequisites:**
-- Docker Desktop installed
-- 8GB+ RAM allocated to Docker
-
-**🛠️ Option 3: Local Build (Best Performance)**
+**�️ Option 2: Local Build (Best Performance)**
 
 For optimal performance, build locally after installing dependencies:
 
@@ -418,31 +295,6 @@ Once services are running:
 
 ## 🛠️ Troubleshooting
 
-### Common Docker Issues
-
-**Port Conflicts:**
-```bash
-# Stop services
-./run-docker.sh stop  # or .\run-docker.ps1 stop
-
-# Check port usage
-netstat -an | grep :8178
-lsof -i :8178  # macOS/Linux
-```
-
-**GPU Not Detected (Windows):**
-- Enable WSL2 integration in Docker Desktop
-- Install nvidia-container-toolkit
-- Verify with: `.\run-docker.ps1 gpu-test`
-
-**Model Download Failures:**
-```bash
-# Manual download
-./run-docker.sh models download base.en
-# or
-.\run-docker.ps1 models download base.en
-```
-
 ### Common Native Issues
 
 **Windows Build Problems:**
@@ -485,74 +337,6 @@ kill -9 PID   # Kill process
 
 ## 📖 Complete Script Reference
 
-### Docker Scripts
-
-#### build-docker.ps1 / build-docker.sh
-Build Docker images with GPU support and cross-platform compatibility.
-
-**Usage:**
-```bash
-# Build Types
-cpu, gpu, macos, both, test-gpu
-
-# Options
--Registry/-r REGISTRY    # Docker registry
--Push/-p                 # Push to registry
--Tag/-t TAG             # Custom tag
--Platforms PLATFORMS    # Target platforms
--BuildArgs ARGS         # Build arguments
--NoCache/--no-cache     # Build without cache
--DryRun/--dry-run       # Show commands only
-```
-
-**Examples:**
-```bash
-# Basic builds
-.\build-docker.ps1 cpu
-./build-docker.sh gpu
-
-# Multi-platform with registry
-.\build-docker.ps1 both -Registry "ghcr.io/user" -Push
-./build-docker.sh cpu --platforms "linux/amd64,linux/arm64" --push
-```
-
-#### run-docker.ps1 / run-docker.sh
-Complete Docker deployment manager with interactive setup.
-
-**Commands:**
-```bash
-start, stop, restart, logs, status, shell, clean, build, models, gpu-test, setup-db, compose
-```
-
-**Start Options:**
-```bash
--Model/-m MODEL         # Whisper model (default: base.en)
--Port/-p PORT          # Whisper port (default: 8178)
--AppPort/--app-port    # Meeting app port (default: 5167)
--Gpu/-g/--gpu          # Force GPU mode
--Cpu/-c/--cpu          # Force CPU mode
--Language/--language   # Language code (default: auto)
--Translate/--translate # Enable translation
--Diarize/--diarize     # Enable diarization
--Detach/-d/--detach    # Run in background
--Interactive/-i        # Interactive setup
-```
-
-**Examples:**
-```bash
-# Interactive setup
-.\run-docker.ps1 start -Interactive
-./run-docker.sh start --interactive
-
-# Advanced configuration
-.\run-docker.ps1 start -Model large-v3 -Gpu -Language es -Detach
-./run-docker.sh start --model base --translate --diarize --detach
-
-# Management
-.\run-docker.ps1 logs -Service whisper -Follow
-./run-docker.sh logs --service app --follow --lines 100
-```
-
 ### Native Scripts
 
 #### build_whisper.cmd / build_whisper.sh
@@ -583,33 +367,6 @@ WHISPER_TRANSLATE=false        # Translation
 WHISPER_DIARIZE=false          # Diarization
 ```
 
-**Build Configuration:**
-```bash
-REGISTRY=ghcr.io/user          # Docker registry
-PUSH=true                      # Push to registry
-PLATFORMS=linux/amd64          # Target platforms
-FORCE_GPU=true                 # Force GPU mode
-DEBUG=true                     # Debug output
-```
-
-### Database Migration
-
-**Supported Sources:**
-- Existing Homebrew installations
-- Manual database file paths
-- Auto-discovery in common locations
-- Fresh installation (creates new database)
-
-**Auto-Discovery Paths (macOS/Linux):**
-```
-/opt/homebrew/Cellar/meetily-backend/*/backend/meeting_minutes.db
-$HOME/.meetily/meeting_minutes.db
-$HOME/Documents/meetily/meeting_minutes.db
-$HOME/Desktop/meeting_minutes.db
-./meeting_minutes.db
-$SCRIPT_DIR/data/meeting_minutes.db
-```
-
 ### Advanced Features
 
 **Port Conflict Resolution:**
@@ -620,9 +377,7 @@ $SCRIPT_DIR/data/meeting_minutes.db
 
 **GPU Detection:**
 - Automatic NVIDIA GPU detection
-- Docker GPU support verification
 - Fallback to CPU mode when GPU unavailable
-- GPU test functionality
 
 **Model Management:**
 - Automatic model downloading

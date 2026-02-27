@@ -58,11 +58,6 @@ pnpm run tauri:dev:cpu      # CPU-only (no GPU)
 build_whisper.cmd small               # Build Whisper with model
 start_with_output.ps1                 # Interactive setup and start
 clean_start_backend.cmd               # Start server
-
-# Docker (Cross-Platform)
-./run-docker.sh start --interactive   # Interactive setup (macOS/Linux)
-.\run-docker.ps1 start -Interactive   # Interactive setup (Windows)
-./run-docker.sh logs --service app    # View logs
 ```
 
 **Available Whisper Models**: `tiny`, `tiny.en`, `base`, `base.en`, `small`, `small.en`, `medium`, `medium.en`, `large-v1`, `large-v2`, `large-v3`, `large-v3-turbo`

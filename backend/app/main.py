@@ -1,3 +1,13 @@
+import sys
+from pathlib import Path
+import os
+
+# Add parent directory (backend/) to Python path so we can import diarization_service
+# When running as `python app\main.py`, __file__ is relative, so resolve to absolute first
+backend_dir = Path(__file__).resolve().parent.parent
+if str(backend_dir) not in sys.path:
+    sys.path.insert(0, str(backend_dir))
+
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -62,6 +72,9 @@ class Transcript(BaseModel):
     audio_start_time: Optional[float] = None
     audio_end_time: Optional[float] = None
     duration: Optional[float] = None
+    # Speaker diarization fields
+    speaker_id: Optional[str] = None
+    speaker_label: Optional[str] = None
 
 class MeetingResponse(BaseModel):
     id: str
@@ -526,7 +539,7 @@ async def save_transcript(request: SaveTranscriptRequest):
         # Save the meeting with folder path (if provided)
         await db.save_meeting(meeting_id, request.meeting_title, folder_path=request.folder_path)
 
-        # Save each transcript segment with NEW timestamp fields for playback sync
+        # Save each transcript segment with timestamp fields and speaker info
         for transcript in request.transcripts:
             await db.save_meeting_transcript(
                 meeting_id=meeting_id,
@@ -535,10 +548,11 @@ async def save_transcript(request: SaveTranscriptRequest):
                 summary="",
                 action_items="",
                 key_points="",
-                # NEW: Recording-relative timestamps for audio-transcript synchronization
                 audio_start_time=transcript.audio_start_time,
                 audio_end_time=transcript.audio_end_time,
-                duration=transcript.duration
+                duration=transcript.duration,
+                speaker_id=transcript.speaker_id,
+                speaker_label=transcript.speaker_label
             )
 
         logger.info("Transcripts saved successfully")
@@ -656,6 +670,7 @@ class DiarizationRequest(BaseModel):
     """Request for speaker diarization on an audio file"""
     audio_path: str
     meeting_id: Optional[str] = None
+    session_id: Optional[str] = None  # Session ID for cross-chunk speaker tracking
     min_speakers: Optional[int] = None
     max_speakers: Optional[int] = None
 
@@ -682,6 +697,7 @@ async def get_diarization_status():
             "available": True,
             "model_loaded": service.is_model_loaded,
             "device": service.device,
+            "speaker_tracking_available": service.speaker_tracking_available,
             "model": model_info.__dict__ if model_info else None
         })
     except HTTPException:
@@ -711,10 +727,10 @@ async def configure_diarization(config: DiarizationConfigRequest):
             # Save token to database for persistence
             await db.save_diarization_config(hf_token=config.hf_token)
             
-            # Reinitialize service with new token
+            # Reinitialize service with new token using factory function
             global _diarization_service
-            from diarization_service import DiarizationService
-            _diarization_service = DiarizationService(hf_token=config.hf_token)
+            from diarization_service import get_diarization_service as _get_service
+            _diarization_service = _get_service(hf_token=config.hf_token)
             
             logger.info("Diarization service configured with new HF token")
             
@@ -759,6 +775,9 @@ async def process_diarization(request: DiarizationRequest, background_tasks: Bac
     
     This identifies distinct speakers in the audio and returns their speaking segments.
     Results can be used to assign speaker labels to transcript segments.
+    
+    When session_id is provided, uses cross-chunk speaker tracking to maintain
+    consistent speaker IDs across multiple audio chunks within the same meeting.
     """
     try:
         service = get_diarization_service()
@@ -767,12 +786,20 @@ async def process_diarization(request: DiarizationRequest, background_tasks: Bac
         if not service.is_model_loaded:
             await service.load_model()
         
-        # Run diarization
-        result = await service.diarize_audio(
-            audio_path=request.audio_path,
-            min_speakers=request.min_speakers,
-            max_speakers=request.max_speakers
-        )
+        # Run diarization (with cross-chunk tracking if session_id provided)
+        if request.session_id:
+            result = await service.diarize_audio_with_tracking(
+                audio_path=request.audio_path,
+                session_id=request.session_id,
+                min_speakers=request.min_speakers,
+                max_speakers=request.max_speakers
+            )
+        else:
+            result = await service.diarize_audio(
+                audio_path=request.audio_path,
+                min_speakers=request.min_speakers,
+                max_speakers=request.max_speakers
+            )
         
         # If meeting_id provided, update transcripts with speaker info
         if request.meeting_id:
@@ -846,6 +873,61 @@ async def get_diarization_config():
     except Exception as e:
         logger.error(f"Error getting diarization config: {e}")
         return JSONResponse(content={"hf_token_configured": False})
+
+
+@app.get("/diarization/session/{session_id}/speakers")
+async def get_session_speakers(session_id: str):
+    """
+    Get speaker information for a session.
+    
+    Returns summary of all speakers detected in the session,
+    including their total speaking duration and number of chunks.
+    Uses cross-chunk speaker tracking data.
+    """
+    try:
+        service = get_diarization_service()
+        speakers = service.get_session_speakers(session_id)
+        
+        return JSONResponse(content={
+            "session_id": session_id,
+            "speakers": speakers,
+            "speaker_count": len(speakers),
+            "speaker_tracking_available": service.speaker_tracking_available
+        })
+    except HTTPException:
+        return JSONResponse(content={
+            "session_id": session_id,
+            "speakers": [],
+            "speaker_count": 0,
+            "speaker_tracking_available": False
+        })
+    except Exception as e:
+        logger.error(f"Error getting session speakers: {e}")
+        return JSONResponse(content={
+            "session_id": session_id,
+            "speakers": [],
+            "speaker_count": 0,
+            "error": str(e)
+        })
+
+
+@app.delete("/diarization/session/{session_id}")
+async def clear_diarization_session(session_id: str):
+    """
+    Clear speaker tracking data for a session.
+    Call this when a meeting ends to free memory.
+    Embeddings are also removed from disk if persistence is enabled.
+    """
+    try:
+        service = get_diarization_service()
+        service.clear_session(session_id)
+        
+        return {"status": "ok", "message": f"Session {session_id} cleared"}
+    except HTTPException:
+        return {"status": "ok", "message": "Diarization service not available, nothing to clear"}
+    except Exception as e:
+        logger.error(f"Error clearing session: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.on_event("shutdown")
