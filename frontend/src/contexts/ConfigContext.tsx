@@ -72,6 +72,10 @@ interface ConfigContextType {
   autoUpdateMeetingName: boolean;
   toggleAutoUpdateMeetingName: (checked: boolean) => void;
 
+  // Startup communication
+  disableStartupCommunication: boolean;
+  toggleDisableStartupCommunication: (checked: boolean) => void;
+
   // Provider-specific API keys
   providerApiKeys: {
     claude: string | null;
@@ -156,6 +160,14 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   const [autoUpdateMeetingName, setAutoUpdateMeetingName] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('autoUpdateMeetingName');
+      return saved !== null ? saved === 'true' : false
+    }
+    return false;
+  });
+
+  const [disableStartupCommunication, setDisableStartupCommunication] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('disableStartupCommunication');
       return saved !== null ? saved === 'true' : false
     }
     return false;
@@ -394,6 +406,13 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  const toggleDisableStartupCommunication = useCallback((checked: boolean) => {
+    setDisableStartupCommunication(checked);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('disableStartupCommunication', checked.toString());
+    }
+  }, [])
+
   // Update individual provider API key
   const updateProviderApiKey = useCallback((provider: string, apiKey: string | null) => {
     setProviderApiKeys(prev => ({ ...prev, [provider]: apiKey }));
@@ -466,6 +485,8 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     toggleIsAutoSummary,
     autoUpdateMeetingName,
     toggleAutoUpdateMeetingName,
+    disableStartupCommunication,
+    toggleDisableStartupCommunication,
     providerApiKeys,
     updateProviderApiKey,
     transcriptModelConfig,
@@ -490,6 +511,8 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     toggleIsAutoSummary,
     autoUpdateMeetingName,
     toggleAutoUpdateMeetingName,
+    disableStartupCommunication,
+    toggleDisableStartupCommunication,
     providerApiKeys,
     updateProviderApiKey,
     transcriptModelConfig,

@@ -5,6 +5,7 @@ import { useUpdateCheck } from '@/hooks/useUpdateCheck';
 import { UpdateInfo } from '@/services/updateService';
 import { UpdateDialog } from './UpdateDialog';
 import { setUpdateDialogCallback, showUpdateNotification } from './UpdateNotification';
+import { useConfig } from '@/contexts/ConfigContext';
 
 interface UpdateCheckContextType {
   updateInfo: UpdateInfo | null;
@@ -17,14 +18,15 @@ const UpdateCheckContext = createContext<UpdateCheckContextType | undefined>(und
 
 export function UpdateCheckProvider({ children }: { children: React.ReactNode }) {
   const [showDialog, setShowDialog] = useState(false);
+  const { disableStartupCommunication } = useConfig();
 
   const handleShowDialog = useCallback(() => {
     setShowDialog(true);
   }, []);
 
   const { updateInfo, isChecking, checkForUpdates } = useUpdateCheck({
-    checkOnMount: true,
-    showNotification: true,
+    checkOnMount: !disableStartupCommunication,
+    showNotification: !disableStartupCommunication,
     onUpdateAvailable: (info) => {
       // Show notification, dialog will be shown when user clicks notification
       showUpdateNotification(info, handleShowDialog);

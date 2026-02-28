@@ -81,6 +81,7 @@ impl SummaryService {
         model_name: String,
         custom_prompt: String,
         template_id: String,
+        auto_update_meeting_name: bool,
     ) {
         let start_time = Instant::now();
         info!(
@@ -263,20 +264,27 @@ impl SummaryService {
                 );
                 info!("final markdown is {}", &final_markdown);
 
-                // Extract and update meeting name if present
+                // Extract and update meeting name if present and auto-update is enabled
                 if let Some(name) = extract_meeting_name_from_markdown(&final_markdown) {
                     if !name.is_empty() {
-                        info!(
-                            "Updating meeting name to '{}' for meeting_id: {}",
-                            name, meeting_id
-                        );
-                        if let Err(e) =
-                            MeetingsRepository::update_meeting_title(&pool, &meeting_id, &name).await
-                        {
-                            error!("Failed to update meeting name for {}: {}", meeting_id, e);
+                        if auto_update_meeting_name {
+                            info!(
+                                "Updating meeting name to '{}' for meeting_id: {}",
+                                name, meeting_id
+                            );
+                            if let Err(e) =
+                                MeetingsRepository::update_meeting_title(&pool, &meeting_id, &name).await
+                            {
+                                error!("Failed to update meeting name for {}: {}", meeting_id, e);
+                            }
+                        } else {
+                            info!(
+                                "Auto-update meeting name is disabled, skipping name update for meeting_id: {}",
+                                meeting_id
+                            );
                         }
 
-                        // Strip the title line from markdown
+                        // Strip the title line from markdown regardless of auto-update setting
                         info!("Stripping title from final_markdown");
                         if let Some(hash_pos) = final_markdown.find('#') {
                             // Find end of first line after '#'

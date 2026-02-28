@@ -115,6 +115,7 @@ export function useSummaryGeneration({
         overlap: 1000,
         customPrompt: customPrompt,
         templateId: selectedTemplate,
+        autoUpdateMeetingName: autoUpdateMeetingName ?? true,
       }) as any;
 
       const process_id = result.process_id;
@@ -357,6 +358,7 @@ export function useSummaryGeneration({
     setAiSummary,
     updateMeetingTitle,
     onMeetingUpdated,
+    autoUpdateMeetingName,
   ]);
 
   // Helper function to fetch ALL transcripts for summary generation
@@ -571,7 +573,45 @@ export function useSummaryGeneration({
       })
       .join('\n');
 
-    await processSummary({ transcriptText: fullTranscript, customPrompt });
+    // Compute recording start and end times to provide context to the LLM
+    const recordingStartTime = meeting.created_at
+      ? new Date(meeting.created_at).toLocaleString()
+      : 'Unknown';
+    // Derive end time from the last transcript's audio_end_time or updated_at
+    let recordingEndTime = 'Unknown';
+    if (allTranscripts.length > 0) {
+      const lastTranscript = allTranscripts[allTranscripts.length - 1];
+      if (lastTranscript.audio_end_time !== undefined && meeting.created_at) {
+        const endDate = new Date(new Date(meeting.created_at).getTime() + lastTranscript.audio_end_time * 1000);
+        recordingEndTime = endDate.toLocaleString();
+      } else if (lastTranscript.timestamp) {
+        recordingEndTime = new Date(lastTranscript.timestamp).toLocaleString();
+      }
+    }
+    // Calculate duration
+    let recordingDuration = '';
+    if (allTranscripts.length > 0) {
+      const lastTranscript = allTranscripts[allTranscripts.length - 1];
+      if (lastTranscript.audio_end_time !== undefined) {
+        const totalSecs = Math.floor(lastTranscript.audio_end_time);
+        const hours = Math.floor(totalSecs / 3600);
+        const mins = Math.floor((totalSecs % 3600) / 60);
+        const secs = totalSecs % 60;
+        recordingDuration = hours > 0
+          ? `${hours}h ${mins}m ${secs}s`
+          : `${mins}m ${secs}s`;
+      }
+    }
+
+    const recordingMetadata = [
+      `Recording Start: ${recordingStartTime}`,
+      `Recording End: ${recordingEndTime}`,
+      ...(recordingDuration ? [`Recording Duration: ${recordingDuration}`] : []),
+    ].join('\n');
+
+    const transcriptWithMetadata = `--- Recording Information ---\n${recordingMetadata}\n--- Transcript ---\n${fullTranscript}`;
+
+    await processSummary({ transcriptText: transcriptWithMetadata, customPrompt });
   }, [meeting.id, fetchAllTranscripts, processSummary, modelConfig, isModelConfigLoading, selectedTemplate]);
 
   // Public API: Regenerate summary from original transcript

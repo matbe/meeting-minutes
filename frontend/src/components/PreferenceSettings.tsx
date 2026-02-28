@@ -14,7 +14,9 @@ export function PreferenceSettings() {
     storageLocations,
     isLoadingPreferences,
     loadPreferences,
-    updateNotificationSettings
+    updateNotificationSettings,
+    disableStartupCommunication,
+    toggleDisableStartupCommunication
   } = useConfig();
 
   const [notificationsEnabled, setNotificationsEnabled] = useState<boolean | null>(null);
@@ -329,6 +331,17 @@ export function PreferenceSettings() {
           <p className="text-xs text-amber-800">
             <strong>Note:</strong> Changing storage paths will require restarting the application. Existing data will not be automatically moved to the new location.
           </p>
+        </div>
+      </div>
+
+      {/* Startup Communication Section */}
+      <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Disable Startup Communication</h3>
+            <p className="text-sm text-gray-600">Disable automatic update checks and any other communication to project servers on startup</p>
+          </div>
+          <Switch checked={disableStartupCommunication} onCheckedChange={toggleDisableStartupCommunication} />
         </div>
       </div>
 
