@@ -167,6 +167,16 @@ pub struct VocabularyEntryParsed {
     pub enabled: bool,
 }
 
+/// Meeting notes stored per-meeting for persistent markdown notes
+#[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
+pub struct MeetingNote {
+    pub meeting_id: String,
+    pub notes_markdown: Option<String>,
+    pub notes_json: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 impl From<VocabularyEntry> for VocabularyEntryParsed {
     fn from(entry: VocabularyEntry) -> Self {
         let alternatives = entry.alternatives

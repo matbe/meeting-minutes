@@ -265,6 +265,11 @@ export function useRecordingStop(
           console.log('   Transcripts:', freshTranscripts.length);
           console.log('   folder_path:', folderPath);
 
+          // Store the newly created meeting ID in sessionStorage so recording notes will persist to this meeting
+          // (even if user navigates away before auto-navigation)
+          sessionStorage.setItem('current_recording_meeting_id', meetingId);
+          console.log('📝 Stored current recording meeting ID for note persistence:', meetingId);
+
           // Mark meeting as saved in IndexedDB (for recovery system)
           await markMeetingAsSaved();
 

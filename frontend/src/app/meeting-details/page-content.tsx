@@ -19,6 +19,7 @@ import { useTemplates } from '@/hooks/meeting-details/useTemplates';
 import { useCopyOperations } from '@/hooks/meeting-details/useCopyOperations';
 import { useMeetingOperations } from '@/hooks/meeting-details/useMeetingOperations';
 import { useConfig } from '@/contexts/ConfigContext';
+import { useNotes } from '@/hooks/useNotes';
 
 export default function PageContent({
   meeting,
@@ -54,9 +55,51 @@ export default function PageContent({
   });
 
   // State
-  const [customPrompt, setCustomPrompt] = useState<string>('');
   const [isRecording] = useState(false);
   const [summaryResponse] = useState<SummaryResponse | null>(null);
+
+  // Notes hook - persistent markdown notes for this meeting
+  const notes = useNotes({ meetingId: meeting.id });
+
+  // Persist recording notes from sessionStorage (when navigating from recording page)
+  useEffect(() => {
+    const savedMarkdown = sessionStorage.getItem('recording_notes_markdown');
+    const savedBlocksJson = sessionStorage.getItem('recording_notes_blocks');
+    const recordingMeetingId = sessionStorage.getItem('current_recording_meeting_id');
+    
+    if (savedMarkdown && savedMarkdown.trim()) {
+      console.log('📝 Found recording notes in sessionStorage, saving to DB...');
+      let blocks: any[] | undefined;
+      if (savedBlocksJson) {
+        try {
+          blocks = JSON.parse(savedBlocksJson);
+        } catch { /* ignore parse errors */ }
+      }
+
+      const persistNotes = async () => {
+        // Use the meeting ID from the recording that generated these notes, not the current page's meeting ID
+        // This prevents notes from being attached to the wrong meeting if user navigated away
+        const targetMeetingId = recordingMeetingId || meeting.id;
+        console.log('📝 Persisting recording notes to meeting:', targetMeetingId, '(current page meeting:', meeting.id, ')');
+        
+        try {
+          const saveSucceeded = await notes.saveNotes(savedMarkdown, blocks, targetMeetingId);
+          if (saveSucceeded) {
+            sessionStorage.removeItem('recording_notes_markdown');
+            sessionStorage.removeItem('recording_notes_blocks');
+            sessionStorage.removeItem('current_recording_meeting_id');
+            console.log('✅ Recording notes persisted successfully');
+          } else {
+            console.warn('⚠️ Failed to persist recording notes, keeping sessionStorage data for retry');
+          }
+        } catch (error) {
+          console.error('Error persisting recording notes:', error);
+        }
+      };
+
+      persistNotes();
+    }
+  }, [meeting.id, notes.saveNotes]); // Only on mount / meeting change
 
   // Audio player state
   const [audioFilePath, setAudioFilePath] = useState<string | null>(null);
@@ -449,8 +492,6 @@ export default function PageContent({
       <div className="flex flex-1 overflow-hidden">
         <TranscriptPanel
           transcripts={meetingData.transcripts}
-          customPrompt={customPrompt}
-          onPromptChange={setCustomPrompt}
           onCopyTranscript={copyOperations.handleCopyTranscript}
           onOpenMeetingFolder={meetingOperations.handleOpenMeetingFolder}
           isRecording={isRecording}
@@ -501,7 +542,7 @@ export default function PageContent({
           onSaveModelConfig={handleSaveModelConfig}
           onGenerateSummary={summaryGeneration.handleGenerateSummary}
           onStopGeneration={summaryGeneration.handleStopGeneration}
-          customPrompt={customPrompt}
+          customPrompt={notes.getNotesForPrompt()}
           summaryResponse={summaryResponse}
           onSaveSummary={meetingData.handleSaveSummary}
           onSummaryChange={meetingData.handleSummaryChange}
@@ -514,6 +555,13 @@ export default function PageContent({
           onTemplateSelect={templates.handleTemplateSelection}
           isModelConfigLoading={false}
           onOpenModelSettings={handleRegisterModalOpen}
+          // Notes props
+          notesMarkdown={notes.notesMarkdown}
+          notesBlocks={notes.notesBlocks}
+          notesIsLoading={notes.isLoading}
+          notesIsSaving={notes.isSaving}
+          notesIsDirty={notes.isDirty}
+          onNotesChange={notes.updateNotes}
         />
       </div>
       

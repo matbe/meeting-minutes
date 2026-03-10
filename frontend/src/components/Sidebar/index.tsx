@@ -919,7 +919,7 @@ const Sidebar: React.FC = () => {
         {/* Footer */}
         {!isCollapsed && (
 
-          <div className="flex-shrink-0 p-2 border-t border-gray-100">
+          <div className="flex-shrink-0 p-2 border-t border-gray-100 space-y-1">
             <button
               onClick={handleRecordingToggle}
               disabled={isRecording}
@@ -927,12 +927,12 @@ const Sidebar: React.FC = () => {
             >
               {isRecording ? (
                 <>
-                  <Square className="w-4 h-4 mr-2" />
-                  <span>Recording in progress...</span>
+                  <Square className="w-4 h-4 mr-2 flex-shrink-0" />
+                  <span className="truncate">Recording in progress...</span>
                 </>
               ) : (
                 <>
-                  <Mic className="w-4 h-4 mr-2" />
+                  <Mic className="w-4 h-4 mr-2 flex-shrink-0" />
                   <span>Start Recording</span>
                 </>
               )}
@@ -940,17 +940,17 @@ const Sidebar: React.FC = () => {
 
             <button
               onClick={() => (window as any).openImportDialog?.()}
-              className="w-full flex items-center justify-center px-3 py-2 mt-1 text-sm font-medium text-gray-700 bg-blue-100 hover:bg-blue-200 rounded-lg transition-colors shadow-sm"
+              className="w-full flex items-center justify-center px-3 py-2 text-sm font-medium text-gray-700 bg-blue-100 hover:bg-blue-200 rounded-lg transition-colors shadow-sm"
             >
-              <Upload className="w-4 h-4 mr-2" />
+              <Upload className="w-4 h-4 mr-2 flex-shrink-0" />
               <span>Import Audio</span>
             </button>
 
             <button
               onClick={() => router.push('/settings')}
-              className="w-full flex items-center justify-center px-3 py-1.5 mt-1 mb-1 text-sm font-medium text-gray-700 bg-gray-200 hover:bg-gray-300 rounded-lg transition-colors shadow-sm"
+              className="w-full flex items-center justify-center px-3 py-1.5 text-sm font-medium text-gray-700 bg-gray-200 hover:bg-gray-300 rounded-lg transition-colors shadow-sm"
             >
-              <Settings className="w-4 h-4 mr-2" />
+              <Settings className="w-4 h-4 mr-2 flex-shrink-0" />
               <span>Settings</span>
             </button>
             <Info isCollapsed={isCollapsed} />

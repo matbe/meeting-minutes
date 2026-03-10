@@ -21,12 +21,22 @@ import { TranscriptRecovery } from '@/components/TranscriptRecovery';
 import { indexedDBService } from '@/services/indexedDBService';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
+import { invoke } from '@tauri-apps/api/core';
+import dynamic from 'next/dynamic';
+import { Block } from '@blocknote/core';
+import { SummaryPanel } from '@/components/MeetingDetails/SummaryPanel';
+import { ModelConfig } from '@/components/ModelSettingsModal';
 
 export default function Home() {
   // Local page state (not moved to contexts)
   const [isRecording, setIsRecordingState] = useState(false);
   const [barHeights, setBarHeights] = useState(['58%', '76%', '58%']);
   const [showRecoveryDialog, setShowRecoveryDialog] = useState(false);
+
+  // Recording notes state - stored in memory, persisted after meeting save
+  const [recordingNotesMarkdown, setRecordingNotesMarkdown] = useState<string>('');
+  const [recordingNotesBlocks, setRecordingNotesBlocks] = useState<Block[] | null>(null);
+  const [showNotesPanel, setShowNotesPanel] = useState(false);
 
   // Use contexts for state management
   const { meetingTitle } = useTranscripts();
@@ -65,6 +75,25 @@ export default function Home() {
   useEffect(() => {
     // Track page view
     Analytics.trackPageView('home');
+  }, []);
+
+  // Rehydrate recording notes when returning to this page
+  useEffect(() => {
+    const savedMarkdown = sessionStorage.getItem('recording_notes_markdown');
+    const savedBlocksJson = sessionStorage.getItem('recording_notes_blocks');
+
+    if (savedMarkdown !== null) {
+      setRecordingNotesMarkdown(savedMarkdown);
+    }
+
+    if (savedBlocksJson) {
+      try {
+        const parsedBlocks = JSON.parse(savedBlocksJson) as Block[];
+        setRecordingNotesBlocks(parsedBlocks);
+      } catch {
+        setRecordingNotesBlocks(null);
+      }
+    }
   }, []);
 
   // Startup recovery check
@@ -219,18 +248,78 @@ export default function Home() {
           showModal={showModal}
         />
 
+        {/* Notes Panel - unified interface for recording using SummaryPanel with controls disabled */}
+        <div className="hidden md:flex md:w-1/3 lg:w-2/5 min-w-0 border-l border-gray-200 bg-white flex-col">
+          <SummaryPanel
+            meeting={{
+              id: 'recording-session',
+              title: meetingTitle || 'New Meeting',
+              created_at: new Date().toISOString()
+            }}
+            meetingTitle={meetingTitle}
+            onTitleChange={() => {}}
+            isEditingTitle={false}
+            onStartEditTitle={() => {}}
+            onFinishEditTitle={() => {}}
+            isTitleDirty={false}
+            summaryRef={{ current: null } as any}
+            isSaving={false}
+            onSaveAll={async () => {}}
+            onCopySummary={async () => {
+              if (recordingNotesMarkdown) {
+                await navigator.clipboard.writeText(recordingNotesMarkdown);
+                toast.success('Notes copied to clipboard');
+              }
+            }}
+            onOpenFolder={async () => {}}
+            aiSummary={null}
+            summaryStatus="idle"
+            transcripts={[]}
+            modelConfig={{ provider: 'ollama', model: '', ollamaEndpoint: '' } as ModelConfig}
+            setModelConfig={() => {}}
+            onSaveModelConfig={async () => {}}
+            onGenerateSummary={async () => {}}
+            onStopGeneration={() => {}}
+            customPrompt=""
+            summaryResponse={null}
+            onSaveSummary={async () => {}}
+            onSummaryChange={() => {}}
+            onDirtyChange={() => {}}
+            summaryError={null}
+            onRegenerateSummary={async () => {}}
+            getSummaryStatusMessage={() => ''}
+            availableTemplates={[]}
+            selectedTemplate=""
+            onTemplateSelect={() => {}}
+            isModelConfigLoading={false}
+            onOpenModelSettings={() => {}}
+            notesMarkdown={recordingNotesMarkdown}
+            notesBlocks={recordingNotesBlocks}
+            notesIsLoading={false}
+            notesIsSaving={false}
+            notesIsDirty={false}
+            onNotesChange={(markdown, blocks) => {
+              setRecordingNotesMarkdown(markdown);
+              setRecordingNotesBlocks(blocks);
+              sessionStorage.setItem('recording_notes_markdown', markdown);
+              sessionStorage.setItem('recording_notes_blocks', JSON.stringify(blocks));
+            }}
+            summaryControlsDisabled={true}
+          />
+        </div>
+
         {/* Recording controls - only show when permissions are granted or already recording and not showing status messages */}
         {(hasMicrophone || isRecording) &&
           status !== RecordingStatus.PROCESSING_TRANSCRIPTS &&
           status !== RecordingStatus.SAVING && (
-            <div className="fixed bottom-12 left-0 right-0 z-10">
+            <div className="fixed bottom-12 left-0 right-0 z-10 pointer-events-none">
               <div
-                className="flex justify-center pl-8 transition-[margin] duration-300"
+                className="flex justify-center transition-[margin] duration-300 pointer-events-auto"
                 style={{
                   marginLeft: sidebarCollapsed ? '4rem' : '16rem'
                 }}
               >
-                <div className="w-2/3 max-w-[750px] flex justify-center">
+                <div className="max-w-[750px] flex justify-center px-4">
                   <div className="bg-white rounded-full shadow-lg flex items-center">
                     <RecordingControls
                       isRecording={recordingState.isRecording}

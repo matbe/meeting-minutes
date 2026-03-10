@@ -38,10 +38,10 @@ export function EnhanceButton({
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button
-          className={`flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 border border-gray-200 rounded-md text-sm text-gray-600 hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${className}`}
+          className={`flex items-center gap-1 px-2 py-1.5 bg-gray-100 border border-gray-200 rounded-md text-sm text-gray-600 hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap ${className}`}
           type="button"
           disabled={isDisabled}
-          title={!hasAudioFile ? "No audio file available" : undefined}
+          title={!hasAudioFile ? "No audio file available" : "Enhance transcript"}
         >
           {isEnhancing ? (
             <>

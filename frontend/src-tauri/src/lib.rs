@@ -737,6 +737,9 @@ pub fn run() {
             database::vocabulary_commands::import_vocabulary,
             database::vocabulary_commands::export_vocabulary,
             database::vocabulary_commands::apply_vocabulary_correction_to_transcripts,
+            // Meeting notes commands
+            database::notes_commands::api_get_meeting_notes,
+            database::notes_commands::api_save_meeting_notes,
             // Retranscription commands
             audio::retranscription::start_retranscription_command,
             audio::retranscription::cancel_retranscription_command,

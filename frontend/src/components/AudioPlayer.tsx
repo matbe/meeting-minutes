@@ -268,17 +268,17 @@ export const AudioPlayer = forwardRef<AudioPlayerRef, AudioPlayerProps>(
     const isDisabled = !audioFilePath || isLoading || !!error;
 
     return (
-      <div className={`bg-white border-t border-gray-200 py-3 px-4 ${className}`}>
-        <div className="flex items-center gap-4">
+      <div className={`bg-white border-t border-gray-200 py-3 px-3 ${className}`}>
+        <div className="flex items-center gap-2 flex-wrap">
           {/* Tag Button */}
           <button
-            className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 rounded-md text-sm text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex items-center gap-1 px-2 py-1.5 border border-gray-300 rounded-md text-sm text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
             type="button"
             disabled={isDisabled}
             onClick={onTagClick}
           >
             <User className="w-4 h-4" />
-            <span>Tag</span>
+            <span className="hidden xl:inline">Tag</span>
           </button>
 
           {/* Play/Pause Button */}
@@ -299,13 +299,13 @@ export const AudioPlayer = forwardRef<AudioPlayerRef, AudioPlayerProps>(
           </button>
 
           {/* Time Display - Current */}
-          <span className={`text-sm font-mono min-w-[45px] ${isDisabled ? 'text-gray-300' : 'text-gray-500'}`}>
+          <span className={`text-xs font-mono min-w-[40px] flex-shrink-0 ${isDisabled ? 'text-gray-300' : 'text-gray-500'}`}>
             {formatTime(currentTime)}
           </span>
 
           {/* Progress Bar (clickable) */}
           <div 
-            className={`flex-1 h-1 bg-gray-200 rounded-full relative group ${isDisabled ? 'cursor-not-allowed' : 'cursor-pointer'}`}
+            className={`flex-1 min-w-[60px] h-1 bg-gray-200 rounded-full relative group ${isDisabled ? 'cursor-not-allowed' : 'cursor-pointer'}`}
             onClick={isDisabled ? undefined : handleProgressClick}
           >
             <div 
@@ -326,17 +326,19 @@ export const AudioPlayer = forwardRef<AudioPlayerRef, AudioPlayerProps>(
           </div>
 
           {/* Time Display - Duration */}
-          <span className={`text-sm font-mono min-w-[45px] ${isDisabled ? 'text-gray-300' : 'text-gray-500'}`}>
+          <span className={`text-xs font-mono min-w-[40px] flex-shrink-0 ${isDisabled ? 'text-gray-300' : 'text-gray-500'}`}>
             {formatTime(duration)}
           </span>
 
           {/* Enhance Button */}
-          <EnhanceButton
-            onFullEnhance={onFullEnhance || (() => {})}
-            onQuickLabel={onQuickLabel || (() => {})}
-            disabled={isDisabled}
-            isEnhancing={isEnhancing}
-          />
+          <div className="flex-shrink-0">
+            <EnhanceButton
+              onFullEnhance={onFullEnhance || (() => {})}
+              onQuickLabel={onQuickLabel || (() => {})}
+              disabled={isDisabled}
+              isEnhancing={isEnhancing}
+            />
+          </div>
         </div>
 
         {/* Error Message - only show if there's an error AND we have an audio file */}
