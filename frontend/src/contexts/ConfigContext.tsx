@@ -188,7 +188,6 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   // Beta features state (localStorage)
   const [betaFeatures, setBetaFeatures] = useState<BetaFeatures>(() => {
     return loadBetaFeatures();
->>>>>>> 91b0c0985932d0797e249033601afa14f22ee3d3
   });
 
   // Preference settings state (lazy loaded)
