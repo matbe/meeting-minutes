@@ -1,7 +1,7 @@
 'use client';
 
 import { Transcript, VocabularyEntry } from '@/types';
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { ConfidenceIndicator } from './ConfidenceIndicator';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { RecordingStatusBar } from './RecordingStatusBar';
@@ -156,6 +156,18 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
     return correctTranscript(text, vocabulary);
   }, [vocabulary]);
 
+  // OPTIMIZATION: Cache corrected transcripts to avoid re-correcting on every render
+  // Only recompute when transcripts array changes or vocabulary changes
+  // This fixes the slow switching between old recordings issue
+  const correctedTranscripts = useMemo(() => {
+    console.log('📊 [TranscriptView] Recalculating corrected transcripts (count:', transcripts.length, ')');
+    
+    return transcripts.map(transcript => ({
+      ...transcript,
+      correctedText: applyVocabularyCorrection(cleanStopWords(transcript.text))
+    }));
+  }, [transcripts, applyVocabularyCorrection]);
+
   // Load preference for showing confidence indicator
   const [showConfidence, setShowConfidence] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
@@ -290,23 +302,26 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
         )}
       </AnimatePresence>
 
-      {transcripts?.map((transcript, index) => {
+      {correctedTranscripts?.map((transcriptData, index) => {
+        const transcript = transcriptData;
         const isStreaming = streamingTranscript?.id === transcript.id;
         const textToShow = isStreaming ? streamingTranscript.visibleText : transcript.text;
-        // Clean up text for display - remove repetitions and filler words
-        const cleanedText = cleanStopWords(textToShow);
-        // Apply vocabulary correction to fix common misrecognitions
-        const filteredText = applyVocabularyCorrection(cleanedText);
+        
+        // For streaming, compute corrections in real-time; for normal display, use cached corrections
+        const filteredText = isStreaming 
+          ? applyVocabularyCorrection(cleanStopWords(textToShow))
+          : transcriptData.correctedText;
+        
         // Show [Silence] ONLY if the ORIGINAL transcript was empty (not just after filtering)
         const originalWasEmpty = transcript.text.trim() === '';
         const displayText = originalWasEmpty && !isStreaming ? '[Silence]' : filteredText;
 
         // Sizer text: calculate full text once and reuse the correction result
-        // For streaming, use the full text; for regular, we can reuse the filtered text
+        // For streaming, use the full text; for regular, use the pre-computed corrected text
         const fullTextForSizer = isStreaming ? streamingTranscript.fullText : transcript.text;
         const sizerText = isStreaming 
           ? applyVocabularyCorrection(cleanStopWords(fullTextForSizer))
-          : (filteredText || (originalWasEmpty ? '[Silence]' : ''));
+          : (transcriptData.correctedText || (originalWasEmpty ? '[Silence]' : ''));
 
         return (
           <motion.div

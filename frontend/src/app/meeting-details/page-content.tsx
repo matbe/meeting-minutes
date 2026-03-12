@@ -85,10 +85,11 @@ export default function PageContent({
         try {
           const saveSucceeded = await notes.saveNotes(savedMarkdown, blocks, targetMeetingId);
           if (saveSucceeded) {
-            sessionStorage.removeItem('recording_notes_markdown');
-            sessionStorage.removeItem('recording_notes_blocks');
-            sessionStorage.removeItem('current_recording_meeting_id');
-            console.log('✅ Recording notes persisted successfully');
+            // FIXED: Don't clear sessionStorage here - let it persist so notes stay visible in the UI
+            // SessionStorage will be cleared when user starts a NEW recording (in useRecordingStart)
+            // This allows notes to remain visible even after recording completes and the meeting is saved
+            console.log('✅ Recording notes persisted successfully to DB');
+            console.log('📝 sessionStorage preserved for UI persistence - will be cleared on next recording');
           } else {
             console.warn('⚠️ Failed to persist recording notes, keeping sessionStorage data for retry');
           }

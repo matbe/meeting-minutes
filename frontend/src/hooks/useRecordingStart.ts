@@ -111,6 +111,13 @@ export function useRecordingStart(
       const randomTitle = generateMeetingTitle();
       setMeetingTitle(randomTitle);
 
+      // Clear old recording session notes when starting a new recording
+      // This ensures each recording starts with a clean notes slate
+      sessionStorage.removeItem('recording_notes_markdown');
+      sessionStorage.removeItem('recording_notes_blocks');
+      sessionStorage.removeItem('current_recording_meeting_id');
+      console.log('🗑️ Cleared previous recording notes from sessionStorage');
+
       // Set STARTING status before initiating backend recording
       setStatus(RecordingStatus.STARTING, 'Initializing recording...');
 
