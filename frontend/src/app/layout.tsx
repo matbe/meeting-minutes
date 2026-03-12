@@ -15,19 +15,52 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import { RecordingStateProvider } from '@/contexts/RecordingStateContext'
 import { OllamaDownloadProvider } from '@/contexts/OllamaDownloadContext'
 import { TranscriptProvider } from '@/contexts/TranscriptContext'
-import { ConfigProvider } from '@/contexts/ConfigContext'
+import { ConfigProvider, useConfig } from '@/contexts/ConfigContext'
 import { OnboardingProvider } from '@/contexts/OnboardingContext'
 import { OnboardingFlow } from '@/components/onboarding'
+import { loadBetaFeatures } from '@/types/betaFeatures'
 import { DownloadProgressToastProvider } from '@/components/shared/DownloadProgressToast'
 import { UpdateCheckProvider } from '@/components/UpdateCheckProvider'
 import { RecordingPostProcessingProvider } from '@/contexts/RecordingPostProcessingProvider'
 import { ImportAudioDialog, ImportDropOverlay } from '@/components/ImportAudio'
+import { ImportDialogProvider } from '@/contexts/ImportDialogContext'
+import { isAudioExtension, getAudioFormatsDisplayList } from '@/constants/audioFormats'
+
+
 
 const sourceSans3 = Source_Sans_3({
   subsets: ['latin'],
   weight: ['400', '500', '600', '700'],
   variable: '--font-source-sans-3',
 })
+
+// Module-level component — stable reference across RootLayout re-renders.
+// Defined here (not inside RootLayout) so React never sees a new function type
+// on re-render, which would cause unmount/remount and break initialization logic.
+function ConditionalImportDialog({
+  showImportDialog,
+  handleImportDialogClose,
+  importFilePath,
+}: {
+  showImportDialog: boolean;
+  handleImportDialogClose: (open: boolean) => void;
+  importFilePath: string | null;
+}) {
+  const { betaFeatures } = useConfig();
+
+  // Only mount ImportAudioDialog (and its hooks/listeners) when feature is enabled
+  if (!betaFeatures.importAndRetranscribe) {
+    return null;
+  }
+
+  return (
+    <ImportAudioDialog
+      open={showImportDialog}
+      onOpenChange={handleImportDialogClose}
+      preselectedFile={importFilePath}
+    />
+  );
+}
 
 // export { metadata } from './metadata'
 
@@ -100,10 +133,20 @@ export default function RootLayout({
 
   // Handle file drop for audio import
   const handleFileDrop = useCallback((paths: string[]) => {
+    // Check if beta features are enabled (read from localStorage directly since we're outside ConfigProvider)
+    const betaFeatures = loadBetaFeatures();
+
+    if (!betaFeatures.importAndRetranscribe) {
+      toast.error('Beta feature disabled', {
+        description: 'Enable "Import Audio & Retranscribe" in Settings > Beta to use this feature.'
+      });
+      return;
+    }
+
     // Find the first audio file
     const audioFile = paths.find(p => {
       const ext = p.split('.').pop()?.toLowerCase();
-      return ext && AUDIO_EXTENSIONS.includes(ext);
+      return !!ext && isAudioExtension(ext);
     });
 
     if (audioFile) {
@@ -112,7 +155,7 @@ export default function RootLayout({
       setShowImportDialog(true);
     } else if (paths.length > 0) {
       toast.error('Please drop an audio file', {
-        description: 'Supported formats: MP4, WAV, MP3, FLAC, OGG'
+        description: `Supported formats: ${getAudioFormatsDisplayList()}`
       });
     }
   }, []);
@@ -122,18 +165,30 @@ export default function RootLayout({
     if (showOnboarding) return; // Don't handle drops during onboarding
 
     const unlisteners: UnlistenFn[] = [];
+    const cleanedUpRef = { current: false };
 
     const setupListeners = async () => {
-      // Drag enter/over - show overlay
+      // Drag enter/over - show overlay only if beta feature is enabled
       const unlistenDragEnter = await listen('tauri://drag-enter', () => {
-        setShowDropOverlay(true);
+        if (loadBetaFeatures().importAndRetranscribe) {
+          setShowDropOverlay(true);
+        }
       });
+      if (cleanedUpRef.current) {
+        unlistenDragEnter();
+        return;
+      }
       unlisteners.push(unlistenDragEnter);
 
       // Drag leave - hide overlay
       const unlistenDragLeave = await listen('tauri://drag-leave', () => {
         setShowDropOverlay(false);
       });
+      if (cleanedUpRef.current) {
+        unlistenDragLeave();
+        unlisteners.forEach(u => u());
+        return;
+      }
       unlisteners.push(unlistenDragLeave);
 
       // Drop - process files
@@ -141,12 +196,18 @@ export default function RootLayout({
         setShowDropOverlay(false);
         handleFileDrop(event.payload.paths);
       });
+      if (cleanedUpRef.current) {
+        unlistenDrop();
+        unlisteners.forEach(u => u());
+        return;
+      }
       unlisteners.push(unlistenDrop);
     };
 
     setupListeners();
 
     return () => {
+      cleanedUpRef.current = true;
       unlisteners.forEach((unlisten) => unlisten());
     };
   }, [showOnboarding, handleFileDrop]);
@@ -159,16 +220,10 @@ export default function RootLayout({
     }
   }, []);
 
-  // Expose function to open import dialog from sidebar
-  useEffect(() => {
-    (window as any).openImportDialog = () => {
-      setImportFilePath(null);
-      setShowImportDialog(true);
-    };
-
-    return () => {
-      delete (window as any).openImportDialog;
-    };
+  // Handler for ImportDialogProvider - opens import dialog from any child component
+  const handleOpenImportDialog = useCallback((filePath?: string | null) => {
+    setImportFilePath(filePath ?? null);
+    setShowImportDialog(true);
   }, []);
 
   const handleOnboardingComplete = () => {
@@ -192,25 +247,27 @@ export default function RootLayout({
                       <SidebarProvider>
                         <TooltipProvider>
                           <RecordingPostProcessingProvider>
-                            {/* Download progress toast provider - listens for background downloads */}
-                            <DownloadProgressToastProvider />
+                            <ImportDialogProvider onOpen={handleOpenImportDialog}>
+                              {/* Download progress toast provider - listens for background downloads */}
+                              <DownloadProgressToastProvider />
 
-                            {/* Show onboarding or main app */}
-                            {showOnboarding ? (
-                              <OnboardingFlow onComplete={handleOnboardingComplete} />
-                            ) : (
-                              <div className="flex">
-                                <Sidebar />
-                                <MainContent>{children}</MainContent>
-                              </div>
-                            )}
-                            {/* Import audio overlay and dialog */}
-                            <ImportDropOverlay visible={showDropOverlay} />
-                            <ImportAudioDialog
-                              open={showImportDialog}
-                              onOpenChange={handleImportDialogClose}
-                              preselectedFile={importFilePath}
-                            />
+                              {/* Show onboarding or main app */}
+                              {showOnboarding ? (
+                                <OnboardingFlow onComplete={handleOnboardingComplete} />
+                              ) : (
+                                <div className="flex">
+                                  <Sidebar />
+                                  <MainContent>{children}</MainContent>
+                                </div>
+                              )}
+                              {/* Import audio overlay and dialog */}
+                              <ImportDropOverlay visible={showDropOverlay} />
+                              <ConditionalImportDialog
+                                showImportDialog={showImportDialog}
+                                handleImportDialogClose={handleImportDialogClose}
+                                importFilePath={importFilePath}
+                              />
+                            </ImportDialogProvider>
                           </RecordingPostProcessingProvider>
                         </TooltipProvider>
                       </SidebarProvider>

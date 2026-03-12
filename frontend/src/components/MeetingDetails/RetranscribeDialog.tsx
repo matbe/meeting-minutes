@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { RefreshCw, Globe, Loader2, AlertCircle, CheckCircle2, X, Cpu, Zap } from 'lucide-react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { RefreshCw, Globe, Loader2, AlertCircle, CheckCircle2, X, Cpu } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -16,52 +16,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../ui/select';
-import { ButtonGroup } from '../ui/button-group';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { toast } from 'sonner';
 import { useConfig } from '@/contexts/ConfigContext';
-
-// ISO 639-1 language codes supported by Whisper
-const LANGUAGES = [
-  { code: 'auto', name: 'Auto Detect (Original Language)' },
-  { code: 'auto-translate', name: 'Auto Detect (Translate to English)' },
-  { code: 'en', name: 'English' },
-  { code: 'zh', name: 'Chinese' },
-  { code: 'de', name: 'German' },
-  { code: 'es', name: 'Spanish' },
-  { code: 'ru', name: 'Russian' },
-  { code: 'ko', name: 'Korean' },
-  { code: 'fr', name: 'French' },
-  { code: 'ja', name: 'Japanese' },
-  { code: 'pt', name: 'Portuguese' },
-  { code: 'tr', name: 'Turkish' },
-  { code: 'pl', name: 'Polish' },
-  { code: 'ca', name: 'Catalan' },
-  { code: 'nl', name: 'Dutch' },
-  { code: 'ar', name: 'Arabic' },
-  { code: 'sv', name: 'Swedish' },
-  { code: 'it', name: 'Italian' },
-  { code: 'id', name: 'Indonesian' },
-  { code: 'hi', name: 'Hindi' },
-  { code: 'fi', name: 'Finnish' },
-  { code: 'vi', name: 'Vietnamese' },
-  { code: 'he', name: 'Hebrew' },
-  { code: 'uk', name: 'Ukrainian' },
-  { code: 'el', name: 'Greek' },
-  { code: 'ms', name: 'Malay' },
-  { code: 'cs', name: 'Czech' },
-  { code: 'ro', name: 'Romanian' },
-  { code: 'da', name: 'Danish' },
-  { code: 'hu', name: 'Hungarian' },
-  { code: 'ta', name: 'Tamil' },
-  { code: 'no', name: 'Norwegian' },
-  { code: 'th', name: 'Thai' },
-  { code: 'ur', name: 'Urdu' },
-  { code: 'hr', name: 'Croatian' },
-  { code: 'bg', name: 'Bulgarian' },
-  { code: 'lt', name: 'Lithuanian' },
-];
+import { LANGUAGES } from '@/constants/languages';
+import { useTranscriptionModels, ModelOption } from '@/hooks/useTranscriptionModels';
+import Analytics from '@/lib/analytics';
 
 interface RetranscribeDialogProps {
   open: boolean;
@@ -90,19 +51,6 @@ interface RetranscriptionError {
   error: string;
 }
 
-interface RawModelInfo {
-  name: string;
-  size_mb: number;
-  status: 'Available' | 'Missing' | { Downloading: { progress: number } } | { Error: string } | { Corrupted: { file_size: number; expected_min_size: number } };
-}
-
-interface ModelOption {
-  provider: 'whisper' | 'parakeet';
-  name: string;
-  displayName: string;
-  size_mb: number;
-}
-
 export function RetranscribeDialog({
   open,
   onOpenChange,
@@ -115,99 +63,67 @@ export function RetranscribeDialog({
   const [progress, setProgress] = useState<RetranscriptionProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedLang, setSelectedLang] = useState(selectedLanguage || 'auto');
-  const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
-  const [selectedModelKey, setSelectedModelKey] = useState<string>(''); // Format: "provider:model"
-  const [loadingModels, setLoadingModels] = useState(false);
-  const [transcriptionMethod, setTranscriptionMethod] = useState<'standard' | 'nutwhisper'>('standard');
 
-  // Helper to get selected model details
-  const getSelectedModel = (): ModelOption | undefined => {
+  // Use centralized model fetching hook
+  const {
+    availableModels,
+    selectedModelKey,
+    setSelectedModelKey,
+    loadingModels,
+    fetchModels,
+    resetSelection,
+  } = useTranscriptionModels(transcriptModelConfig);
+
+  // Stable refs for callbacks to avoid listener re-registration
+  const onCompleteRef = useRef(onComplete);
+  const onOpenChangeRef = useRef(onOpenChange);
+  useEffect(() => { onCompleteRef.current = onComplete; }, [onComplete]);
+  useEffect(() => { onOpenChangeRef.current = onOpenChange; }, [onOpenChange]);
+
+  // Track previous open state to only reset on closed→open transition
+  const prevOpenRef = useRef(false);
+
+  // Helper to get selected model details (memoized)
+  const selectedModelDetails = useMemo((): ModelOption | undefined => {
     if (!selectedModelKey) return undefined;
-    const [provider, name] = selectedModelKey.split(':');
+    const colonIndex = selectedModelKey.indexOf(':');
+    if (colonIndex === -1) return undefined;
+    const provider = selectedModelKey.slice(0, colonIndex);
+    const name = selectedModelKey.slice(colonIndex + 1);
     return availableModels.find(m => m.provider === provider && m.name === name);
-  };
+  }, [selectedModelKey, availableModels]);
+  const isParakeetModel = selectedModelDetails?.provider === 'parakeet';
 
-  // Check if selected model is Whisper
-  const isWhisperModelSelected = (): boolean => {
-    const selectedModel = getSelectedModel();
-    return selectedModel?.provider === 'whisper';
-  };
-
-  // Reset state and fetch models when dialog opens
   useEffect(() => {
-    if (open) {
+    if (isParakeetModel && selectedLang !== 'auto') {
+      setSelectedLang('auto');
+    }
+  }, [isParakeetModel, selectedLang]);
+
+  // Reset state only when dialog transitions from closed to open
+  // This prevents re-initialization when config changes while dialog is already open
+  useEffect(() => {
+    const wasOpen = prevOpenRef.current;
+    prevOpenRef.current = open;
+
+    if (open && !wasOpen) {
+      resetSelection();
       setIsProcessing(false);
       setProgress(null);
       setError(null);
       setSelectedLang(selectedLanguage || 'auto');
 
-      // Fetch available models from both Whisper and Parakeet
-      const fetchModels = async () => {
-        setLoadingModels(true);
-        const allModels: ModelOption[] = [];
-
-        // Fetch Whisper models
-        try {
-          const whisperModels = await invoke<RawModelInfo[]>('whisper_get_available_models');
-          const availableWhisper = whisperModels
-            .filter(m => m.status === 'Available')
-            .map(m => ({
-              provider: 'whisper' as const,
-              name: m.name,
-              displayName: `🏠 Whisper: ${m.name}`,
-              size_mb: m.size_mb,
-            }));
-          allModels.push(...availableWhisper);
-        } catch (err) {
-          console.error('Failed to fetch Whisper models:', err);
-        }
-
-        // Fetch Parakeet models
-        try {
-          const parakeetModels = await invoke<RawModelInfo[]>('parakeet_get_available_models');
-          const availableParakeet = parakeetModels
-            .filter(m => m.status === 'Available')
-            .map(m => ({
-              provider: 'parakeet' as const,
-              name: m.name,
-              displayName: `⚡ Parakeet: ${m.name}`,
-              size_mb: m.size_mb,
-            }));
-          allModels.push(...availableParakeet);
-        } catch (err) {
-          console.error('Failed to fetch Parakeet models:', err);
-        }
-
-        setAvailableModels(allModels);
-
-        // Set default model based on current transcript config
-        const configuredProvider = transcriptModelConfig?.provider || '';
-        const configuredModel = transcriptModelConfig?.model || '';
-
-        // Try to match configured model
-        const configuredMatch = allModels.find(m =>
-          (configuredProvider === 'localWhisper' && m.provider === 'whisper' && m.name === configuredModel) ||
-          (configuredProvider === 'parakeet' && m.provider === 'parakeet' && m.name === configuredModel)
-        );
-
-        if (configuredMatch) {
-          setSelectedModelKey(`${configuredMatch.provider}:${configuredMatch.name}`);
-        } else if (allModels.length > 0) {
-          // Default to first available model
-          setSelectedModelKey(`${allModels[0].provider}:${allModels[0].name}`);
-        }
-
-        setLoadingModels(false);
-      };
+      // Fetch available models using centralized hook
       fetchModels();
     }
-  }, [open, selectedLanguage, transcriptModelConfig]);
+  }, [open, selectedLanguage, transcriptModelConfig, fetchModels]);
 
   // Listen for retranscription events
   useEffect(() => {
     if (!open) return;
 
     const unlisteners: UnlistenFn[] = [];
+    const cleanedUpRef = { current: false };
 
     const setupListeners = async () => {
       // Progress events
@@ -219,43 +135,66 @@ export function RetranscribeDialog({
           }
         }
       );
+      if (cleanedUpRef.current) {
+        unlistenProgress();
+        return;
+      }
       unlisteners.push(unlistenProgress);
 
       // Completion event
       const unlistenComplete = await listen<RetranscriptionResult>(
         'retranscription-complete',
-        (event) => {
+        async (event) => {
           if (event.payload.meeting_id === meetingId) {
+            await Analytics.track('enhance_transcript_completed', {
+              success: 'true',
+              duration_seconds: event.payload.duration_seconds.toString(),
+              segments_count: event.payload.segments_count.toString()
+            });
+
             setIsProcessing(false);
             toast.success(
               `Retranscription complete! ${event.payload.segments_count} segments created.`
             );
-            onComplete?.();
-            onOpenChange(false);
+            onCompleteRef.current?.();
+            onOpenChangeRef.current(false);
           }
         }
       );
+      if (cleanedUpRef.current) {
+        unlistenComplete();
+        unlisteners.forEach(u => u());
+        return;
+      }
       unlisteners.push(unlistenComplete);
 
       // Error event
       const unlistenError = await listen<RetranscriptionError>(
         'retranscription-error',
-        (event) => {
+        async (event) => {
           if (event.payload.meeting_id === meetingId) {
+            await Analytics.trackError('enhance_transcript_failed', event.payload.error);
+
             setIsProcessing(false);
             setError(event.payload.error);
           }
         }
       );
+      if (cleanedUpRef.current) {
+        unlistenError();
+        unlisteners.forEach(u => u());
+        return;
+      }
       unlisteners.push(unlistenError);
     };
 
     setupListeners();
 
     return () => {
+      cleanedUpRef.current = true;
       unlisteners.forEach((unlisten) => unlisten());
     };
-  }, [open, meetingId, onComplete, onOpenChange]);
+  }, [open, meetingId]);
 
   const handleStartRetranscription = async () => {
     if (!meetingFolderPath) {
@@ -268,18 +207,26 @@ export function RetranscribeDialog({
     setProgress(null);
 
     try {
-      const selectedModelDetails = getSelectedModel();
+      const languageToSend = isParakeetModel ? null : selectedLang === 'auto' ? null : selectedLang;
+      await Analytics.track('enhance_transcript_started', {
+        language: isParakeetModel ? 'auto' : (selectedLang === 'auto' ? 'auto' : selectedLang),
+        model_provider: selectedModelDetails?.provider || '',
+        model_name: selectedModelDetails?.name || ''
+      });
+
       await invoke('start_retranscription_command', {
         meetingId,
         meetingFolderPath,
-        language: selectedLang === 'auto' ? null : selectedLang,
+        language: languageToSend,
         model: selectedModelDetails?.name || null,
         provider: selectedModelDetails?.provider || null,
-        useNutWhisper: transcriptionMethod === 'nutwhisper',
       });
     } catch (err: any) {
       setIsProcessing(false);
-      setError(err.message || 'Failed to start retranscription');
+      const errorMsg = typeof err === 'string' ? err : (err?.message || String(err));
+      setError(errorMsg);
+
+      await Analytics.trackError('enhance_transcript_failed', errorMsg);
     }
   };
 
@@ -317,10 +264,6 @@ export function RetranscribeDialog({
     }
   };
 
-  const getLanguageName = (code: string) => {
-    return LANGUAGES.find((l) => l.code === code)?.name || code;
-  };
-
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
@@ -351,34 +294,46 @@ export function RetranscribeDialog({
             {isProcessing
               ? progress?.message || 'Processing audio...'
               : error
-              ? 'An error occurred during retranscription'
-              : 'Re-process the audio with different language settings'}
+                ? 'An error occurred during retranscription'
+                : 'Re-process the audio with different language settings'}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-4">
           {!isProcessing && !error && (
-            <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                <Globe className="h-4 w-4 text-muted-foreground" />
-                <span className="text-sm font-medium">Language</span>
+            !isParakeetModel ? (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <Globe className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-sm font-medium">Language</span>
+                </div>
+                <Select value={selectedLang} onValueChange={setSelectedLang}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select language" />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-60">
+                    {LANGUAGES.map((lang) => (
+                      <SelectItem key={lang.code} value={lang.code}>
+                        {lang.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Select a specific language to improve accuracy, or use auto-detect
+                </p>
               </div>
-              <Select value={selectedLang} onValueChange={setSelectedLang}>
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select language" />
-                </SelectTrigger>
-                <SelectContent className="max-h-60">
-                  {LANGUAGES.map((lang) => (
-                    <SelectItem key={lang.code} value={lang.code}>
-                      {lang.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">
-                Select a specific language to improve accuracy, or use auto-detect
-              </p>
-            </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <Globe className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-sm font-medium">Language</span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Language selection isn't supported for Parakeet. It always uses automatic detection.
+                </p>
+              </div>
+            )
           )}
 
           {!isProcessing && !error && availableModels.length > 0 && (
@@ -401,36 +356,6 @@ export function RetranscribeDialog({
               </Select>
               <p className="text-xs text-muted-foreground">
                 Choose a transcription model
-              </p>
-            </div>
-          )}
-
-          {!isProcessing && !error && isWhisperModelSelected() && (
-            <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                <Zap className="h-4 w-4 text-muted-foreground" />
-                <span className="text-sm font-medium">Method</span>
-              </div>
-              <ButtonGroup className="w-full">
-                <Button
-                  variant={transcriptionMethod === 'standard' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setTranscriptionMethod('standard')}
-                  className="flex-1"
-                >
-                  Standard
-                </Button>
-                <Button
-                  variant={transcriptionMethod === 'nutwhisper' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setTranscriptionMethod('nutwhisper')}
-                  className="flex-1"
-                >
-                  NutWhisper
-                </Button>
-              </ButtonGroup>
-              <p className="text-xs text-muted-foreground">
-                Standard uses batch processing, NutWhisper uses streaming processing for potentially faster results
               </p>
             </div>
           )}

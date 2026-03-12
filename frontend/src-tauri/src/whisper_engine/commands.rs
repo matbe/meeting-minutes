@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::path::PathBuf;
 use tauri::{command, Emitter, Manager, AppHandle, Runtime};
 use serde::{Serialize, Deserialize};
+use crate::config::WHISPER_MODEL_CATALOG;
 
 /// Whisper provider type - choose between standard and NutWhisper (Nutshell-style)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -373,24 +374,12 @@ fn discover_models_standalone() -> Result<Vec<ModelInfo>, String> {
 
     log::info!("Scanning for Whisper models in: {}", whisper_dir.display());
 
-    let model_configs = [
-        ("tiny", "ggml-tiny.bin", 39, "Decent", "Very Fast", "Fastest processing"),
-        ("base", "ggml-base.bin", 142, "Good", "Fast", "Good balance"),
-        ("small", "ggml-small.bin", 466, "Good", "Medium", "Better accuracy"),
-        ("medium", "ggml-medium.bin", 1420, "High", "Slow", "High accuracy"),
-        ("large-v3-turbo", "ggml-large-v3-turbo.bin", 809, "High", "Medium", "Best accuracy with speed"),
-        ("large-v3", "ggml-large-v3.bin", 3174, "High", "Slow", "Best accuracy"),
-        ("tiny-q5_0", "ggml-tiny-q5_0.bin", 26, "Decent", "Very Fast", "Quantized tiny"),
-        ("base-q5_0", "ggml-base-q5_0.bin", 85, "Good", "Fast", "Quantized base"),
-        ("small-q5_0", "ggml-small-q5_0.bin", 280, "Good", "Fast", "Quantized small"),
-        ("medium-q5_0", "ggml-medium-q5_0.bin", 852, "High", "Medium", "Quantized medium"),
-        ("large-v3-turbo-q5_0", "ggml-large-v3-turbo-q5_0.bin", 574, "High", "Medium", "Quantized large turbo"),
-        ("large-v3-q5_0", "ggml-large-v3-q5_0.bin", 1050, "High", "Slow", "Quantized large"),
-    ];
+    // Use centralized model catalog from config.rs
+    let model_configs = WHISPER_MODEL_CATALOG;
 
     let mut models = Vec::new();
 
-    for (name, filename, size_mb, accuracy, speed, description) in model_configs {
+    for &(name, filename, size_mb, accuracy, speed, description) in model_configs {
         let model_path = whisper_dir.join(filename);
         let status = if model_path.exists() {
             match std::fs::metadata(&model_path) {

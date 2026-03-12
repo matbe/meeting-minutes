@@ -42,6 +42,7 @@ interface TranscriptPanelProps {
   meetingId?: string;
   meetingFolderPath?: string | null;
   hasAudioFile?: boolean;
+  onRefetchTranscripts?: () => Promise<void>;
 }
 
 export function TranscriptPanel({
@@ -69,6 +70,7 @@ export function TranscriptPanel({
   meetingId,
   meetingFolderPath,
   hasAudioFile = true,
+  onRefetchTranscripts,
 }: TranscriptPanelProps) {
   // Convert transcripts to segments if pagination is not used but we want virtualization
   const convertedSegments = useMemo(() => {
@@ -96,8 +98,8 @@ export function TranscriptPanel({
           onCopyTranscript={onCopyTranscript}
           onOpenMeetingFolder={onOpenMeetingFolder}
           meetingId={meetingId}
-          hasAudioFile={hasAudioFile}
           meetingFolderPath={meetingFolderPath}
+          onRefetchTranscripts={onRefetchTranscripts}
         />
       </div>
 

@@ -6,6 +6,7 @@ import { ButtonGroup } from '@/components/ui/button-group';
 import { Copy, FolderOpen, RefreshCw } from 'lucide-react';
 import Analytics from '@/lib/analytics';
 import { RetranscribeDialog } from './RetranscribeDialog';
+import { useConfig } from '@/contexts/ConfigContext';
 
 
 interface TranscriptButtonGroupProps {
@@ -14,7 +15,7 @@ interface TranscriptButtonGroupProps {
   onOpenMeetingFolder: () => Promise<void>;
   meetingId?: string;
   meetingFolderPath?: string | null;
-  hasAudioFile?: boolean;
+  onRefetchTranscripts?: () => Promise<void>;
 }
 
 
@@ -24,17 +25,20 @@ export function TranscriptButtonGroup({
   onOpenMeetingFolder,
   meetingId,
   meetingFolderPath,
-  hasAudioFile = true,
+  onRefetchTranscripts,
 }: TranscriptButtonGroupProps) {
+  const { betaFeatures } = useConfig();
   const [showRetranscribeDialog, setShowRetranscribeDialog] = useState(false);
 
-  const handleRetranscribeComplete = useCallback(() => {
-    // Reload the page to show updated transcripts
-    window.location.reload();
-  }, []);
+  const handleRetranscribeComplete = useCallback(async () => {
+    // Refetch transcripts to show the updated data
+    if (onRefetchTranscripts) {
+      await onRefetchTranscripts();
+    }
+  }, [onRefetchTranscripts]);
 
   return (
-    <div className="flex items-center justify-center w-full gap-1 flex-wrap">
+    <div className="flex items-center justify-center w-full gap-2">
       <ButtonGroup>
         <Button
           variant="outline"
@@ -47,40 +51,41 @@ export function TranscriptButtonGroup({
           title={transcriptCount === 0 ? 'No transcript available' : 'Copy Transcript'}
         >
           <Copy />
-          <span className="hidden xl:inline">Copy</span>
+          <span className="hidden lg:inline">Copy</span>
         </Button>
 
         <Button
           size="sm"
           variant="outline"
+          className="xl:px-4"
           onClick={() => {
             Analytics.trackButtonClick('open_recording_folder', 'meeting_details');
             onOpenMeetingFolder();
           }}
           title="Open Recording Folder"
         >
-          <FolderOpen />
-          <span className="hidden xl:inline">Recording</span>
+          <FolderOpen className="xl:mr-2" size={18} />
+          <span className="hidden lg:inline">Recording</span>
         </Button>
 
-        {meetingId && meetingFolderPath && (
+        {betaFeatures.importAndRetranscribe && meetingId && meetingFolderPath && (
           <Button
             size="sm"
             variant="outline"
+            className="bg-gradient-to-r from-blue-50 to-purple-50 hover:from-blue-100 hover:to-purple-100 border-blue-200 xl:px-4"
             onClick={() => {
-              Analytics.trackButtonClick('retranscribe', 'meeting_details');
+              Analytics.trackButtonClick('enhance_transcript', 'meeting_details');
               setShowRetranscribeDialog(true);
             }}
-            disabled={!hasAudioFile}
-            title={hasAudioFile ? "Retranscribe with different language" : "No audio file available"}
+            title="Retranscribe to enhance your recorded audio"
           >
-            <RefreshCw />
-            <span className="hidden xl:inline">Retranscribe</span>
+            <RefreshCw className="xl:mr-2" size={18} />
+            <span className="hidden lg:inline">Enhance</span>
           </Button>
         )}
       </ButtonGroup>
 
-      {meetingId && meetingFolderPath && hasAudioFile && (
+      {betaFeatures.importAndRetranscribe && meetingId && meetingFolderPath && (
         <RetranscribeDialog
           open={showRetranscribeDialog}
           onOpenChange={setShowRetranscribeDialog}

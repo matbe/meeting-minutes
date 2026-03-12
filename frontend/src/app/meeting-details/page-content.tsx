@@ -27,6 +27,7 @@ export default function PageContent({
   shouldAutoGenerate = false,
   onAutoGenerateComplete,
   onMeetingUpdated,
+  onRefetchTranscripts,
   // Pagination props for efficient transcript loading
   segments,
   hasMore,
@@ -40,6 +41,7 @@ export default function PageContent({
   shouldAutoGenerate?: boolean;
   onAutoGenerateComplete?: () => void;
   onMeetingUpdated?: () => Promise<void>;
+  onRefetchTranscripts?: () => Promise<void>;
   // Pagination props
   segments?: any[];
   hasMore?: boolean;
@@ -521,6 +523,7 @@ export default function PageContent({
           meetingId={meeting.id}
           meetingFolderPath={meeting.folder_path}
           hasAudioFile={!!audioFilePath}
+          onRefetchTranscripts={onRefetchTranscripts}
         />
         <SummaryPanel
           meeting={meeting}

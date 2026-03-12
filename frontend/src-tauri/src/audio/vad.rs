@@ -70,7 +70,7 @@ impl ContinuousVadProcessor {
         Ok(Self {
             session,
             chunk_size: vad_chunk_size,
-            sample_rate: input_sample_rate, // Store original for timestamp calculations
+            sample_rate: input_sample_rate, // Store input rate for resampling ratio in resample_to_16k()
             buffer: Vec::with_capacity(vad_chunk_size * 2),
             speech_segments: VecDeque::new(),
             current_speech: Vec::new(),
@@ -182,8 +182,12 @@ impl ContinuousVadProcessor {
 
         // Force end any ongoing speech
         if self.in_speech && !self.current_speech.is_empty() {
-            let start_ms = (self.speech_start_sample as f64 / self.sample_rate as f64) * 1000.0;
-            let end_ms = (self.processed_samples as f64 / self.sample_rate as f64) * 1000.0;
+            // processed_samples and speech_start_sample always count 16kHz samples (post-resampling)
+            let start_ms = (self.speech_start_sample as f64 / 16000.0) * 1000.0;
+            let end_ms = (self.processed_samples as f64 / 16000.0) * 1000.0;
+
+            debug!("VAD flush: Force-ending speech - start={}ms, end={}ms, duration={}ms, samples={}",
+                  start_ms, end_ms, end_ms - start_ms, self.current_speech.len());
 
             debug!("VAD flush: Force-ending speech - start={}ms, end={}ms, duration={}ms, samples={}",
                   start_ms, end_ms, end_ms - start_ms, self.current_speech.len());
@@ -235,7 +239,8 @@ impl ContinuousVadProcessor {
                         self.last_logged_state = true;
                     }
                     self.in_speech = true;
-                    self.speech_start_sample = self.processed_samples + (timestamp_ms * self.sample_rate as usize / 1000);
+                    // Use 16000 (VAD processing rate) since processed_samples counts 16kHz samples
+                    self.speech_start_sample = self.processed_samples + (timestamp_ms * 16000 / 1000);
                     self.current_speech.clear();
                 }
                 VadTransition::SpeechEnd { start_timestamp_ms, end_timestamp_ms, samples } => {
@@ -535,6 +540,41 @@ mod tests {
 
         // Should find speech segments
         assert!(all_segments.len() >= 1, "Expected at least 1 speech segment");
+    }
+
+    #[test]
+    fn test_vad_400ms_vs_2000ms_segmentation() {
+        // Demonstrates why 2000ms redemption is needed for batch processing:
+        // 400ms creates excessive fragmentation, 2000ms bridges natural pauses.
+        //
+        // Audio pattern: 60s with 5s speech / 5s silence cycles
+        // Natural pauses within speech (sentence gaps) are 500ms-1.5s
+        let audio = generate_test_audio_with_speech(60.0, 16000);
+
+        let segments_400 = get_speech_chunks(&audio, 400).expect("400ms processing failed");
+        let segments_2000 = get_speech_chunks(&audio, 2000).expect("2000ms processing failed");
+
+        println!(
+            "400ms redemption: {} segments, 2000ms redemption: {} segments",
+            segments_400.len(),
+            segments_2000.len()
+        );
+
+        // 2000ms should produce fewer or equal segments (bridges more pauses)
+        assert!(
+            segments_2000.len() <= segments_400.len(),
+            "2000ms redemption ({} segments) should not produce more segments than 400ms ({} segments)",
+            segments_2000.len(),
+            segments_400.len()
+        );
+
+        // Verify segments have reasonable durations with 2000ms
+        for (i, seg) in segments_2000.iter().enumerate() {
+            let duration_ms = seg.end_timestamp_ms - seg.start_timestamp_ms;
+            println!("2000ms segment {}: {:.0}ms duration", i, duration_ms);
+            // Each segment should be at least 250ms (min_speech_time)
+            assert!(duration_ms >= 200.0, "Segment {} too short: {:.0}ms", i, duration_ms);
+        }
     }
 }
 

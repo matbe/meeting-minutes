@@ -10,7 +10,7 @@ use anyhow::{Result, anyhow};
 use reqwest::Client;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
-use crate::{perf_debug, perf_trace};
+use crate::config::WHISPER_MODEL_CATALOG;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ModelStatus {
@@ -169,34 +169,10 @@ impl WhisperEngine {
     pub async fn discover_models(&self) -> Result<Vec<ModelInfo>> {
         let models_dir = &self.models_dir;
         let mut models = Vec::new();
-                // Using standard ggerganov/whisper.cpp GGML models
-        let model_configs = [
-            // Standard f16 models (full precision)
-            ("tiny", "ggml-tiny.bin", 39, "Decent", "Very Fast", "Fastest processing, good for real-time use"),
-            ("base", "ggml-base.bin", 142, "Good", "Fast", "Good balance of speed and accuracy"),
-            ("small", "ggml-small.bin", 466, "Good", "Medium", "Better accuracy, moderate speed"),
-            ("medium", "ggml-medium.bin", 1420, "High", "Medium", "High accuracy for professional use"),
-            ("large-v3-turbo", "ggml-large-v3-turbo.bin", 809, "High", "Medium", "Best accuracy with improved speed"),
-            ("large-v3", "ggml-large-v3.bin", 3174, "High", "Slow", "Best accuracy, latest large model"),
+        // Use centralized model catalog from config.rs
+        let model_configs = WHISPER_MODEL_CATALOG;
 
-            // Q5_0 quantized models (balanced speed/accuracy)
-            ("tiny-q5_0", "ggml-tiny-q5_0.bin", 26, "Decent", "Very Fast", "Quantized tiny model, ~50% faster processing"),
-            ("base-q5_0", "ggml-base-q5_0.bin", 85, "Good", "Fast", "Quantized base model, good speed/accuracy balance"),
-            ("small-q5_0", "ggml-small-q5_0.bin", 280, "Good", "Fast", "Quantized small model, faster than f16 version"),
-            ("medium-q5_0", "ggml-medium-q5_0.bin", 514, "High", "Medium", "Quantized medium model, professional quality"),
-            ("large-v3-turbo-q5_0", "ggml-large-v3-turbo-q5_0.bin", 574, "High", "Medium", "Quantized large model, best balance"),
-            ("large-v3-q5_0", "ggml-large-v3-q5_0.bin", 1050, "High", "Slow", "Quantized large model, high accuracy"),
-
-            // Q8_0 quantized models (higher quality than q5_0, similar speed)
-            ("tiny-q8_0", "ggml-tiny-q8_0.bin", 42, "Decent", "Very Fast", "Higher quality quantized tiny model"),
-            ("base-q8_0", "ggml-base-q8_0.bin", 148, "Good", "Fast", "Higher quality quantized base model"),
-            ("small-q8_0", "ggml-small-q8_0.bin", 488, "Good", "Medium", "Higher quality quantized small model"),
-            ("medium-q8_0", "ggml-medium-q8_0.bin", 823, "High", "Slow", "Higher quality quantized medium model"),
-            ("large-v3-turbo-q8_0", "ggml-large-v3-turbo-q8_0.bin", 843, "High", "Medium", "Higher quality quantized turbo model"),
-
-           ];
-        
-        for (name, filename, size_mb, accuracy, speed, description) in model_configs {
+        for &(name, filename, size_mb, accuracy, speed, description) in model_configs {
             let model_path = models_dir.join(filename);
             let status = if model_path.exists() {
                 // Check if file size is reasonable (at least 1MB for a valid model)

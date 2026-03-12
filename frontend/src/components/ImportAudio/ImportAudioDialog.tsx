@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Upload,
   Globe,
@@ -30,49 +30,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../ui/select';
-import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import { useConfig } from '@/contexts/ConfigContext';
-import { useImportAudio, AudioFileInfo, ImportResult } from '@/hooks/useImportAudio';
+import { useImportAudio, ImportResult } from '@/hooks/useImportAudio';
 import { useRouter } from 'next/navigation';
 import { useSidebar } from '../Sidebar/SidebarProvider';
+import { LANGUAGES } from '@/constants/languages';
+import { useTranscriptionModels, ModelOption } from '@/hooks/useTranscriptionModels';
 
-// ISO 639-1 language codes supported by Whisper
-const LANGUAGES = [
-  { code: 'auto', name: 'Auto Detect (Original Language)' },
-  { code: 'auto-translate', name: 'Auto Detect (Translate to English)' },
-  { code: 'en', name: 'English' },
-  { code: 'zh', name: 'Chinese' },
-  { code: 'de', name: 'German' },
-  { code: 'es', name: 'Spanish' },
-  { code: 'ru', name: 'Russian' },
-  { code: 'ko', name: 'Korean' },
-  { code: 'fr', name: 'French' },
-  { code: 'ja', name: 'Japanese' },
-  { code: 'pt', name: 'Portuguese' },
-  { code: 'tr', name: 'Turkish' },
-  { code: 'pl', name: 'Polish' },
-  { code: 'nl', name: 'Dutch' },
-  { code: 'ar', name: 'Arabic' },
-  { code: 'sv', name: 'Swedish' },
-  { code: 'it', name: 'Italian' },
-  { code: 'hi', name: 'Hindi' },
-  { code: 'vi', name: 'Vietnamese' },
-  { code: 'uk', name: 'Ukrainian' },
-];
-
-interface RawModelInfo {
-  name: string;
-  size_mb: number;
-  status: 'Available' | 'Missing' | { Downloading: { progress: number } } | { Error: string };
-}
-
-interface ModelOption {
-  provider: 'whisper' | 'parakeet';
-  name: string;
-  displayName: string;
-  size_mb: number;
-}
 
 interface ImportAudioDialogProps {
   open: boolean;
@@ -111,30 +76,32 @@ export function ImportAudioDialog({
 
   const [title, setTitle] = useState('');
   const [selectedLang, setSelectedLang] = useState(selectedLanguage || 'auto');
-  const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
-  const [selectedModelKey, setSelectedModelKey] = useState<string>('');
-  const [loadingModels, setLoadingModels] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [titleModifiedByUser, setTitleModifiedByUser] = useState(false);
+
+  // Always start as false — represents "dialog has not yet been opened".
+  // Do NOT initialize from the `open` prop: if the component mounts with open=true
+  // (e.g. drag-drop path), we still need the initialization effect to run.
+  const prevOpenRef = useRef(false);
+
+  // Use centralized model fetching hook
+  const {
+    availableModels,
+    selectedModelKey,
+    setSelectedModelKey,
+    loadingModels,
+    fetchModels,
+    resetSelection,
+  } = useTranscriptionModels(transcriptModelConfig);
 
   const handleImportComplete = useCallback((result: ImportResult) => {
-    toast.success(`Import complete! ${result.segments_count} segments created.`, {
-      action: {
-        label: 'View Meeting',
-        onClick: () => router.push(`/meeting-details?id=${result.meeting_id}`),
-      },
-      duration: 10000,
-    });
+    toast.success(`Import complete! ${result.segments_count} segments created.`);
 
-    // Refresh meetings list
+    // Refresh meetings list then navigate to the imported meeting
     refetchMeetings();
-
-    // Auto-navigate after a short delay
-    setTimeout(() => {
-      router.push(`/meeting-details?id=${result.meeting_id}`);
-    }, 2000);
-
     onComplete?.();
     onOpenChange(false);
+    router.push(`/meeting-details?id=${result.meeting_id}`);
   }, [router, refetchMeetings, onComplete, onOpenChange]);
 
   const handleImportError = useCallback((error: string) => {
@@ -147,6 +114,7 @@ export function ImportAudioDialog({
     progress,
     error,
     isProcessing,
+    isBusy,
     selectFile,
     validateFile,
     startImport,
@@ -157,11 +125,18 @@ export function ImportAudioDialog({
     onError: handleImportError,
   });
 
-  // Reset state when dialog opens
+  // Reset state only when dialog transitions from closed to open
+  // This prevents re-initialization when config changes while dialog is already open (Bug #4 & #5)
   useEffect(() => {
-    if (open) {
+    const wasOpen = prevOpenRef.current;
+    prevOpenRef.current = open;
+
+    // Only initialize when transitioning from closed (false) to open (true)
+    if (open && !wasOpen) {
       reset();
+      resetSelection();
       setTitle('');
+      setTitleModifiedByUser(false);
       setSelectedLang(selectedLanguage || 'auto');
       setShowAdvanced(false);
 
@@ -174,78 +149,33 @@ export function ImportAudioDialog({
         });
       }
 
-      // Fetch available models
-      const fetchModels = async () => {
-        setLoadingModels(true);
-        const allModels: ModelOption[] = [];
-
-        try {
-          const whisperModels = await invoke<RawModelInfo[]>('whisper_get_available_models');
-          const availableWhisper = whisperModels
-            .filter((m) => m.status === 'Available')
-            .map((m) => ({
-              provider: 'whisper' as const,
-              name: m.name,
-              displayName: `Whisper: ${m.name}`,
-              size_mb: m.size_mb,
-            }));
-          allModels.push(...availableWhisper);
-        } catch (err) {
-          console.error('Failed to fetch Whisper models:', err);
-        }
-
-        try {
-          const parakeetModels = await invoke<RawModelInfo[]>('parakeet_get_available_models');
-          const availableParakeet = parakeetModels
-            .filter((m) => m.status === 'Available')
-            .map((m) => ({
-              provider: 'parakeet' as const,
-              name: m.name,
-              displayName: `Parakeet: ${m.name}`,
-              size_mb: m.size_mb,
-            }));
-          allModels.push(...availableParakeet);
-        } catch (err) {
-          console.error('Failed to fetch Parakeet models:', err);
-        }
-
-        setAvailableModels(allModels);
-
-        // Set default model
-        const configuredProvider = transcriptModelConfig?.provider || '';
-        const configuredModel = transcriptModelConfig?.model || '';
-
-        const configuredMatch = allModels.find(
-          (m) =>
-            (configuredProvider === 'localWhisper' && m.provider === 'whisper' && m.name === configuredModel) ||
-            (configuredProvider === 'parakeet' && m.provider === 'parakeet' && m.name === configuredModel)
-        );
-
-        if (configuredMatch) {
-          setSelectedModelKey(`${configuredMatch.provider}:${configuredMatch.name}`);
-        } else if (allModels.length > 0) {
-          setSelectedModelKey(`${allModels[0].provider}:${allModels[0].name}`);
-        }
-
-        setLoadingModels(false);
-      };
-
+      // Fetch available models using centralized hook
       fetchModels();
     }
-  }, [open, preselectedFile, selectedLanguage, transcriptModelConfig, reset, validateFile]);
+  }, [open, preselectedFile, selectedLanguage, transcriptModelConfig, reset, resetSelection, validateFile, fetchModels]);
 
   // Update title when fileInfo changes
   useEffect(() => {
-    if (fileInfo && !title) {
+    if (fileInfo && !title && !titleModifiedByUser) {
       setTitle(fileInfo.filename);
     }
-  }, [fileInfo, title]);
+  }, [fileInfo, title, titleModifiedByUser]);
 
-  const getSelectedModel = (): ModelOption | undefined => {
+  const selectedModel = useMemo((): ModelOption | undefined => {
     if (!selectedModelKey) return undefined;
-    const [provider, name] = selectedModelKey.split(':');
+    const colonIndex = selectedModelKey.indexOf(':');
+    if (colonIndex === -1) return undefined;
+    const provider = selectedModelKey.slice(0, colonIndex);
+    const name = selectedModelKey.slice(colonIndex + 1);
     return availableModels.find((m) => m.provider === provider && m.name === name);
-  };
+  }, [selectedModelKey, availableModels]);
+  const isParakeetModel = selectedModel?.provider === 'parakeet';
+
+  useEffect(() => {
+    if (isParakeetModel && selectedLang !== 'auto') {
+      setSelectedLang('auto');
+    }
+  }, [isParakeetModel, selectedLang]);
 
   const handleSelectFile = async () => {
     const info = await selectFile();
@@ -257,11 +187,10 @@ export function ImportAudioDialog({
   const handleStartImport = async () => {
     if (!fileInfo) return;
 
-    const selectedModel = getSelectedModel();
     await startImport(
       fileInfo.path,
       title || fileInfo.filename,
-      selectedLang === 'auto' ? null : selectedLang,
+      isParakeetModel ? null : selectedLang === 'auto' ? null : selectedLang,
       selectedModel?.name || null,
       selectedModel?.provider || null
     );
@@ -364,7 +293,10 @@ export function ImportAudioDialog({
                     <label className="text-sm font-medium text-gray-700">Meeting Title</label>
                     <Input
                       value={title}
-                      onChange={(e) => setTitle(e.target.value)}
+                      onChange={(e) => {
+                        setTitle(e.target.value);
+                        setTitleModifiedByUser(true);
+                      }}
                       placeholder="Enter meeting title"
                     />
                   </div>
@@ -389,7 +321,7 @@ export function ImportAudioDialog({
                       </>
                     )}
                   </Button>
-                  <p className="text-sm text-gray-500 mt-2">MP4, WAV, MP3, FLAC, OGG</p>
+                  <p className="text-sm text-gray-500 mt-2">MP4, WAV, MP3, FLAC, OGG, MKV, WebM, WMA</p>
                 </div>
               )}
 
@@ -411,24 +343,36 @@ export function ImportAudioDialog({
                   {showAdvanced && (
                     <div className="p-3 pt-0 space-y-4 border-t">
                       {/* Language selector */}
-                      <div className="space-y-2">
-                        <div className="flex items-center gap-2">
-                          <Globe className="h-4 w-4 text-muted-foreground" />
-                          <span className="text-sm font-medium">Language</span>
+                      {!isParakeetModel ? (
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2">
+                            <Globe className="h-4 w-4 text-muted-foreground" />
+                            <span className="text-sm font-medium">Language</span>
+                          </div>
+                          <Select value={selectedLang} onValueChange={setSelectedLang}>
+                            <SelectTrigger className="w-full">
+                              <SelectValue placeholder="Select language" />
+                            </SelectTrigger>
+                            <SelectContent className="max-h-60">
+                              {LANGUAGES.map((lang) => (
+                                <SelectItem key={lang.code} value={lang.code}>
+                                  {lang.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                         </div>
-                        <Select value={selectedLang} onValueChange={setSelectedLang}>
-                          <SelectTrigger className="w-full">
-                            <SelectValue placeholder="Select language" />
-                          </SelectTrigger>
-                          <SelectContent className="max-h-60">
-                            {LANGUAGES.map((lang) => (
-                              <SelectItem key={lang.code} value={lang.code}>
-                                {lang.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2">
+                            <Globe className="h-4 w-4 text-muted-foreground" />
+                            <span className="text-sm font-medium">Language</span>
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            Language selection isn't supported for Parakeet. It always uses automatic detection.
+                          </p>
+                        </div>
+                      )}
 
                       {/* Model selector */}
                       {availableModels.length > 0 && (
