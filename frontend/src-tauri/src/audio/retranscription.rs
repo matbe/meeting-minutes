@@ -94,6 +94,7 @@ pub async fn start_retranscription<R: Runtime>(
     language: Option<String>,
     model: Option<String>,
     provider: Option<String>,
+    use_nut_whisper: bool,
 ) -> Result<RetranscriptionResult> {
     // Acquire guard - ensures flag is cleared even on panic/early return
     let _guard = RetranscriptionGuard::acquire().map_err(|e| anyhow!(e))?;
@@ -102,7 +103,7 @@ pub async fn start_retranscription<R: Runtime>(
     RETRANSCRIPTION_CANCELLED.store(false, Ordering::SeqCst);
 
     let use_parakeet = provider.as_deref() == Some("parakeet");
-    let result = run_retranscription(app.clone(), meeting_id.clone(), meeting_folder_path, language, model, provider).await;
+    let result = run_retranscription(app.clone(), meeting_id.clone(), meeting_folder_path, language, model, provider, use_nut_whisper).await;
 
     // Unload the engine after the batch job (success, failure, or cancellation)
     super::common::unload_engine_after_batch(use_parakeet).await;
@@ -176,6 +177,7 @@ async fn run_retranscription<R: Runtime>(
     language: Option<String>,
     model: Option<String>,
     provider: Option<String>,
+    use_nut_whisper: bool,
 ) -> Result<RetranscriptionResult> {
     let folder_path = PathBuf::from(&meeting_folder_path);
     let audio_path = find_audio_file(&folder_path)?;
@@ -299,13 +301,18 @@ async fn run_retranscription<R: Runtime>(
     emit_progress(&app, &meeting_id, "transcribing", 25, "Loading transcription engine...");
 
     // Initialize the appropriate engine once (not per-segment)
-    let whisper_engine = if !use_parakeet {
+    let whisper_engine = if !use_parakeet && !use_nut_whisper {
         Some(get_or_init_whisper(&app, model.as_deref()).await?)
     } else {
         None
     };
     let parakeet_engine = if use_parakeet {
         Some(get_or_init_parakeet(&app, model.as_deref()).await?)
+    } else {
+        None
+    };
+    let nut_whisper = if use_nut_whisper && !use_parakeet {
+        Some(get_or_init_nut_whisper(&app, model.as_deref(), language.clone()).await?)
     } else {
         None
     };
@@ -375,6 +382,45 @@ async fn run_retranscription<R: Runtime>(
                 .await
                 .map_err(|e| anyhow!("Parakeet transcription failed on segment {}: {}", i, e))?;
             (text, 0.9f32)
+        } else if use_nut_whisper {
+            let nw = nut_whisper.as_ref().unwrap();
+            use crate::whisper_engine::nut_whisper::NutAudioChunk;
+            let chunk = NutAudioChunk {
+                samples: segment.samples.clone(),
+                source: format!("retranscribe-segment-{}", i),
+                timestamp: segment.start_timestamp_ms / 1000.0,
+            };
+            let results = nw.process_chunk(chunk).await
+                .map_err(|e| anyhow!("NutWhisper transcription failed on segment {}: {}", i, e))?;
+            // Also flush to get any remaining text
+            let flush_result = nw.flush().await
+                .map_err(|e| anyhow!("NutWhisper flush failed on segment {}: {}", i, e))?;
+            // Collect all text from results
+            let mut combined_text = String::new();
+            let mut combined_conf = 0.0f32;
+            let mut result_count = 0;
+            for result in &results {
+                if !result.text.trim().is_empty() {
+                    if !combined_text.is_empty() {
+                        combined_text.push(' ');
+                    }
+                    combined_text.push_str(result.text.trim());
+                    combined_conf += result.confidence;
+                    result_count += 1;
+                }
+            }
+            if let Some(flush) = flush_result {
+                if !flush.text.trim().is_empty() {
+                    if !combined_text.is_empty() {
+                        combined_text.push(' ');
+                    }
+                    combined_text.push_str(flush.text.trim());
+                    combined_conf += flush.confidence;
+                    result_count += 1;
+                }
+            }
+            let avg_conf = if result_count > 0 { combined_conf / result_count as f32 } else { 0.0 };
+            (combined_text, avg_conf)
         } else {
             let engine = whisper_engine.as_ref().unwrap();
             let (text, conf, _) = engine
@@ -574,6 +620,54 @@ async fn get_or_init_whisper<R: Runtime>(
         }
         None => Err(anyhow!("Whisper engine not initialized")),
     }
+}
+
+/// Get or initialize NutWhisper for batch retranscription
+/// Creates a fresh NutWhisper instance and loads the requested model
+async fn get_or_init_nut_whisper<R: Runtime>(
+    app: &AppHandle<R>,
+    requested_model: Option<&str>,
+    language: Option<String>,
+) -> Result<Arc<crate::whisper_engine::nut_whisper::NutWhisper>> {
+    use crate::whisper_engine::nut_whisper::{NutWhisper, NutWhisperConfig};
+    use crate::whisper_engine::commands::WHISPER_ENGINE;
+
+    // Determine model name
+    let target_model = match requested_model {
+        Some(model) => model.to_string(),
+        None => get_configured_whisper_model(app).await?,
+    };
+
+    // Get models directory from the standard engine
+    let models_dir = {
+        let engine = {
+            let guard = WHISPER_ENGINE.lock().unwrap_or_else(|e| e.into_inner());
+            guard.as_ref().cloned()
+        };
+        match engine {
+            Some(e) => e.get_models_directory().await,
+            None => return Err(anyhow!("Whisper engine not initialized - cannot determine models directory")),
+        }
+    };
+
+    let model_path = models_dir.join(format!("ggml-{}.bin", target_model));
+    if !model_path.exists() {
+        return Err(anyhow!("Model file not found: {}", model_path.display()));
+    }
+
+    info!("Initializing NutWhisper for retranscription with model '{}'", target_model);
+
+    let config = NutWhisperConfig {
+        language,
+        ..Default::default()
+    };
+    let nw = NutWhisper::new(config);
+    nw.load_model(model_path.to_str().unwrap_or_default())
+        .await
+        .map_err(|e| anyhow!("Failed to load NutWhisper model '{}': {}", target_model, e))?;
+
+    info!("NutWhisper model '{}' loaded successfully for retranscription", target_model);
+    Ok(Arc::new(nw))
 }
 
 /// Get the configured Whisper model name from the database
@@ -782,6 +876,7 @@ pub async fn start_retranscription_command<R: Runtime>(
     language: Option<String>,
     model: Option<String>,
     provider: Option<String>,
+    use_nut_whisper: Option<bool>,
 ) -> Result<RetranscriptionStarted, String> {
 
     // Check if retranscription is already in progress (guard will be acquired in start_retranscription)
@@ -791,6 +886,7 @@ pub async fn start_retranscription_command<R: Runtime>(
 
     // Clone values for the spawned task
     let meeting_id_clone = meeting_id.clone();
+    let use_nut_whisper = use_nut_whisper.unwrap_or(false);
 
     // Spawn the retranscription in a background task
     tauri::async_runtime::spawn(async move {
@@ -801,6 +897,7 @@ pub async fn start_retranscription_command<R: Runtime>(
             language,
             model,
             provider,
+            use_nut_whisper,
         )
         .await;
 
