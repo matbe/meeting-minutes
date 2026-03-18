@@ -7,6 +7,8 @@
 //! # Architecture
 //!
 //! - **Built-in templates**: JSON files in `frontend/src-tauri/templates/` embedded at compile time
+//! - **Bundled templates**: Build-time merged JSON files in `frontend/src-tauri/templates-generated/`
+//! - **Optional bundled overrides**: JSON files in `frontend/src-tauri/templates-optional/` (if present)
 //! - **Custom templates**: JSON files in platform-specific app data directory
 //! - **Fallback strategy**: Custom templates override built-in templates with the same ID
 //!

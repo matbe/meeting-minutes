@@ -489,7 +489,14 @@ pub fn run() {
             // Initialize bundled templates directory for dynamic template discovery
             log::info!("Initializing bundled templates directory...");
             if let Ok(resource_path) = _app.handle().path().resource_dir() {
-                let templates_dir = resource_path.join("templates");
+                let generated_templates_dir = resource_path.join("templates-generated");
+                let fallback_templates_dir = resource_path.join("templates");
+                let templates_dir = if generated_templates_dir.exists() {
+                    generated_templates_dir
+                } else {
+                    fallback_templates_dir
+                };
+
                 log::info!("Setting bundled templates directory to: {:?}", templates_dir);
                 summary::templates::set_bundled_templates_dir(templates_dir);
             } else {

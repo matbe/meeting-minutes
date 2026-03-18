@@ -2,7 +2,13 @@
 
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
-import { Copy, Save, Loader2, Search, FolderOpen } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Copy, Save, Loader2, Search, FolderOpen, ChevronDown } from 'lucide-react';
 import Analytics from '@/lib/analytics';
 
 interface SummaryUpdaterButtonGroupProps {
@@ -10,6 +16,8 @@ interface SummaryUpdaterButtonGroupProps {
   isDirty: boolean;
   onSave: () => Promise<void>;
   onCopy: () => Promise<void>;
+  onCopyMarkdown: () => Promise<void>;
+  onCopyHTML: () => Promise<void>;
   onFind?: () => void;
   onOpenFolder: () => Promise<void>;
   hasSummary: boolean;
@@ -20,6 +28,8 @@ export function SummaryUpdaterButtonGroup({
   isDirty,
   onSave,
   onCopy,
+  onCopyMarkdown,
+  onCopyHTML,
   onFind,
   onOpenFolder,
   hasSummary
@@ -51,21 +61,40 @@ export function SummaryUpdaterButtonGroup({
         )}
       </Button>
 
-      {/* Copy button */}
-      <Button
-        variant="outline"
-        size="sm"
-        title="Copy Summary"
-        onClick={() => {
-          Analytics.trackButtonClick('copy_summary', 'meeting_details');
-          onCopy();
-        }}
-        disabled={!hasSummary}
-        className="cursor-pointer"
-      >
-        <Copy />
-        <span className="hidden xl:inline">Copy</span>
-      </Button>
+      {/* Copy button with dropdown */}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="outline"
+            size="sm"
+            title="Copy Summary"
+            disabled={!hasSummary}
+            className="cursor-pointer flex items-center gap-1"
+          >
+            <Copy className="w-4 h-4" />
+            <span className="hidden xl:inline">Copy</span>
+            <ChevronDown className="w-3 h-3 opacity-50" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem
+            onClick={() => {
+              Analytics.trackButtonClick('copy_summary_markdown', 'meeting_details');
+              onCopyMarkdown();
+            }}
+          >
+            <span>Copy Markdown</span>
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onClick={() => {
+              Analytics.trackButtonClick('copy_summary_html', 'meeting_details');
+              onCopyHTML();
+            }}
+          >
+            <span>Copy HTML</span>
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
 
       {/* Find button */}
       {/* {onFind && (

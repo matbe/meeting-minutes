@@ -5,3 +5,5 @@
 
 Cargo.lock
 Cargo.toml.orig
+templates-optional/
+templates-generated/

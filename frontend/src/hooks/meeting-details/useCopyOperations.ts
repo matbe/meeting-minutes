@@ -4,6 +4,7 @@ import { BlockNoteSummaryViewRef } from '@/components/AISummary/BlockNoteSummary
 import { toast } from 'sonner';
 import Analytics from '@/lib/analytics';
 import { invoke as invokeTauri } from '@tauri-apps/api/core';
+import { generateRichHTML, copyHtmlToClipboard } from '@/lib/markdown-to-html';
 
 interface UseCopyOperationsProps {
   meeting: any;
@@ -104,12 +105,12 @@ export function useCopyOperations({
     });
   }, [meeting, meetingTitle, fetchAllTranscripts]);
 
-  // Copy summary to clipboard
-  const handleCopySummary = useCallback(async () => {
+  // Copy summary to clipboard as Markdown
+  const handleCopySummaryMarkdown = useCallback(async () => {
     try {
       let summaryMarkdown = '';
 
-      console.log('🔍 Copy Summary - Starting...');
+      console.log('🔍 Copy Summary (Markdown) - Starting...');
 
       // Try to get markdown from BlockNote editor first
       if (blockNoteSummaryRef.current?.getMarkdown) {
@@ -175,12 +176,13 @@ export function useCopyOperations({
       const fullMarkdown = header + metadata + summaryMarkdown;
       await navigator.clipboard.writeText(fullMarkdown);
 
-      console.log('✅ Successfully copied to clipboard!');
-      toast.success("Summary copied to clipboard");
+      console.log('✅ Successfully copied to clipboard as Markdown!');
+      toast.success("Summary copied to clipboard as Markdown");
 
       // Track copy analytics
       await Analytics.trackCopy('summary', {
         meeting_id: meeting.id,
+        format: 'markdown',
         has_markdown: (!!aiSummary && 'markdown' in aiSummary).toString()
       });
     } catch (error) {
@@ -189,8 +191,112 @@ export function useCopyOperations({
     }
   }, [aiSummary, meetingTitle, meeting, blockNoteSummaryRef]);
 
+  // Copy summary to clipboard as HTML (OneNote-compatible)
+  const handleCopySummaryHTML = useCallback(async () => {
+    try {
+      let summaryMarkdown = '';
+
+      console.log('🔍 Copy Summary (HTML) - Starting...');
+
+      // Try to get markdown from BlockNote editor first
+      if (blockNoteSummaryRef.current?.getMarkdown) {
+        console.log('📝 Trying to get markdown from ref...');
+        summaryMarkdown = await blockNoteSummaryRef.current.getMarkdown();
+        console.log('📝 Got markdown from ref, length:', summaryMarkdown.length);
+      }
+
+      // Fallback: Check if aiSummary has markdown property
+      if (!summaryMarkdown && aiSummary && 'markdown' in aiSummary) {
+        console.log('📝 Using markdown from aiSummary');
+        summaryMarkdown = (aiSummary as any).markdown || '';
+        console.log('📝 Markdown from aiSummary, length:', summaryMarkdown.length);
+      }
+
+      // Fallback: Check for legacy format
+      if (!summaryMarkdown && aiSummary) {
+        console.log('📝 Converting legacy format to markdown');
+        const sections = Object.entries(aiSummary)
+          .filter(([key]) => {
+            // Skip non-section keys
+            return key !== 'markdown' && key !== 'summary_json' && key !== '_section_order' && key !== 'MeetingName';
+          })
+          .map(([, section]) => {
+            if (section && typeof section === 'object' && 'title' in section && 'blocks' in section) {
+              const sectionTitle = `## ${section.title}\n\n`;
+              const sectionContent = section.blocks
+                .map((block: any) => `- ${block.content}`)
+                .join('\n');
+              return sectionTitle + sectionContent;
+            }
+            return '';
+          })
+          .filter(s => s.trim())
+          .join('\n\n');
+        summaryMarkdown = sections;
+        console.log('📝 Converted legacy format, length:', summaryMarkdown.length);
+      }
+
+      // If still no summary content, show message
+      if (!summaryMarkdown.trim()) {
+        console.error('❌ No summary content available to copy');
+        toast.error('No summary content available to copy');
+        return;
+      }
+
+      // Generate HTML
+      const dateStr = new Date(meeting.created_at).toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+
+      const copiedOnStr = new Date().toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+
+      const htmlContent = generateRichHTML(summaryMarkdown, meetingTitle, {
+        meetingId: meeting.id,
+        date: dateStr,
+        copiedOn: copiedOnStr
+      });
+
+      // Build a plain-text markdown fallback for apps that don't support rich paste
+      const header = `# Meeting Summary: ${meetingTitle}\n\n`;
+      const metadata = `**Meeting ID:** ${meeting.id}\n**Date:** ${dateStr}\n**Copied on:** ${copiedOnStr}\n\n---\n\n`;
+      const markdownFallback = header + metadata + summaryMarkdown;
+
+      await copyHtmlToClipboard(htmlContent, markdownFallback);
+
+      console.log('✅ Successfully copied to clipboard as HTML!');
+      toast.success("Summary copied to clipboard as HTML");
+
+      // Track copy analytics
+      await Analytics.trackCopy('summary', {
+        meeting_id: meeting.id,
+        format: 'html',
+        has_markdown: (!!aiSummary && 'markdown' in aiSummary).toString()
+      });
+    } catch (error) {
+      console.error('❌ Failed to copy summary:', error);
+      toast.error("Failed to copy summary");
+    }
+  }, [aiSummary, meetingTitle, meeting, blockNoteSummaryRef]);
+
+  // Legacy copy summary (for backward compatibility) - defaults to Markdown
+  const handleCopySummary = useCallback(async () => {
+    await handleCopySummaryMarkdown();
+  }, [handleCopySummaryMarkdown]);
+
   return {
     handleCopyTranscript,
     handleCopySummary,
+    handleCopySummaryMarkdown,
+    handleCopySummaryHTML,
   };
 }

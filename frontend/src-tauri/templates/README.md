@@ -53,6 +53,20 @@ Users can add custom templates to the application data directory:
 
 Custom templates override built-in templates with the same filename.
 
+## Optional Build-Time Templates
+
+You can place additional template JSON files in:
+
+- `frontend/src-tauri/templates-optional/`
+
+This folder is intentionally git-ignored. During build, templates from this folder are merged with
+the tracked templates folder into:
+
+- `frontend/src-tauri/templates-generated/`
+
+If an optional template has the same filename as a tracked template, the optional file overrides it
+in the generated resource output for that build.
+
 ## Template Fields
 
 ### Root Level

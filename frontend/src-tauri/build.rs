@@ -1,7 +1,12 @@
 #[path = "build/ffmpeg.rs"]
 mod ffmpeg;
 
+use std::fs;
+use std::path::{Path, PathBuf};
+
 fn main() {
+    prepare_template_resources();
+
     // GPU Acceleration Detection and Build Guidance
     detect_and_report_gpu_capabilities();
 
@@ -19,6 +24,120 @@ fn main() {
     ffmpeg::ensure_ffmpeg_binary();
 
     tauri_build::build()
+}
+
+fn prepare_template_resources() {
+    println!("cargo:rerun-if-changed=templates");
+    println!("cargo:rerun-if-changed=templates-optional");
+
+    let manifest_dir = match std::env::var("CARGO_MANIFEST_DIR") {
+        Ok(value) => PathBuf::from(value),
+        Err(err) => {
+            println!(
+                "cargo:warning=Could not read CARGO_MANIFEST_DIR for template merge: {}",
+                err
+            );
+            return;
+        }
+    };
+
+    let base_templates_dir = manifest_dir.join("templates");
+    let optional_templates_dir = manifest_dir.join("templates-optional");
+    let generated_templates_dir = manifest_dir.join("templates-generated");
+
+    if generated_templates_dir.exists() {
+        if let Err(err) = fs::remove_dir_all(&generated_templates_dir) {
+            println!(
+                "cargo:warning=Failed to clean templates-generated directory: {}",
+                err
+            );
+            return;
+        }
+    }
+
+    if let Err(err) = fs::create_dir_all(&generated_templates_dir) {
+        println!(
+            "cargo:warning=Failed to create templates-generated directory: {}",
+            err
+        );
+        return;
+    }
+
+    let mut copied = 0usize;
+    copied += copy_json_templates(&base_templates_dir, &generated_templates_dir);
+
+    if optional_templates_dir.exists() {
+        copied += copy_json_templates(&optional_templates_dir, &generated_templates_dir);
+        println!(
+            "cargo:warning=Merged optional templates from {}",
+            optional_templates_dir.display()
+        );
+    } else {
+        println!(
+            "cargo:warning=Optional templates directory not found (skipping): {}",
+            optional_templates_dir.display()
+        );
+    }
+
+    println!(
+        "cargo:warning=Prepared {} template resource file(s) in {}",
+        copied,
+        generated_templates_dir.display()
+    );
+}
+
+fn copy_json_templates(source_dir: &Path, destination_dir: &Path) -> usize {
+    if !source_dir.exists() {
+        return 0;
+    }
+
+    let mut copied = 0usize;
+
+    let entries = match fs::read_dir(source_dir) {
+        Ok(entries) => entries,
+        Err(err) => {
+            println!(
+                "cargo:warning=Failed to read templates directory {}: {}",
+                source_dir.display(),
+                err
+            );
+            return 0;
+        }
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+
+        let is_json = path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("json"));
+
+        if !is_json {
+            continue;
+        }
+
+        let file_name = match path.file_name() {
+            Some(name) => name,
+            None => continue,
+        };
+
+        let destination_path = destination_dir.join(file_name);
+        match fs::copy(&path, &destination_path) {
+            Ok(_) => copied += 1,
+            Err(err) => println!(
+                "cargo:warning=Failed to copy template {} to {}: {}",
+                path.display(),
+                destination_path.display(),
+                err
+            ),
+        }
+    }
+
+    copied
 }
 
 /// Detects GPU acceleration capabilities and provides build guidance

@@ -116,6 +116,14 @@ export function useNotes({ meetingId, autoSaveDelay = 1500 }: UseNotesProps): Us
         notesMarkdown: markdown || null,
         notesJson: blocks ? JSON.stringify(blocks) : null,
       });
+
+      if (currentMeetingIdRef.current === idToSaveTo) {
+        setNotesMarkdown(markdown);
+        setNotesBlocks(blocks ?? null);
+        latestMarkdownRef.current = markdown;
+        latestBlocksRef.current = blocks ?? null;
+      }
+
       setIsDirty(false);
       console.log('📝 Notes saved for meeting:', idToSaveTo);
       return true;

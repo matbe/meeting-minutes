@@ -47,6 +47,8 @@ interface SummaryPanelProps {
   isSaving: boolean;
   onSaveAll: () => Promise<void>;
   onCopySummary: () => Promise<void>;
+  onCopySummaryMarkdown?: () => Promise<void>;
+  onCopySummaryHTML?: () => Promise<void>;
   onOpenFolder: () => Promise<void>;
   aiSummary: Summary | null;
   summaryStatus: 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
@@ -92,6 +94,8 @@ export function SummaryPanel({
   isSaving,
   onSaveAll,
   onCopySummary,
+  onCopySummaryMarkdown,
+  onCopySummaryHTML,
   onOpenFolder,
   aiSummary,
   summaryStatus,
@@ -235,6 +239,64 @@ export function SummaryPanel({
     await onCopySummary();
   }, [activeTab, notesMarkdown, onCopySummary]);
 
+  const handleCopyActiveTabMarkdown = useCallback(async () => {
+    if (activeTab === 'notes') {
+      if (!notesMarkdown.trim()) {
+        toast.error('No notes content available to copy');
+        return;
+      }
+
+      await navigator.clipboard.writeText(notesMarkdown);
+      toast.success('Notes copied to clipboard as Markdown');
+      return;
+    }
+
+    if (onCopySummaryMarkdown) {
+      await onCopySummaryMarkdown();
+    } else {
+      await onCopySummary();
+    }
+  }, [activeTab, notesMarkdown, onCopySummary, onCopySummaryMarkdown]);
+
+  const handleCopyActiveTabHTML = useCallback(async () => {
+    if (activeTab === 'notes') {
+      if (!notesMarkdown.trim()) {
+        toast.error('No notes content available to copy');
+        return;
+      }
+
+      // For notes, also convert to HTML format
+      const { generateRichHTML, copyHtmlToClipboard } = await import('@/lib/markdown-to-html');
+      const htmlContent = generateRichHTML(notesMarkdown, 'Notes', {
+        meetingId: meeting.id,
+        date: new Date(meeting.created_at).toLocaleDateString('en-US', {
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        }),
+        copiedOn: new Date().toLocaleDateString('en-US', {
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        })
+      });
+
+      await copyHtmlToClipboard(htmlContent, notesMarkdown);
+      toast.success('Notes copied to clipboard as HTML');
+      return;
+    }
+
+    if (onCopySummaryHTML) {
+      await onCopySummaryHTML();
+    } else {
+      await onCopySummary();
+    }
+  }, [activeTab, notesMarkdown, meeting, onCopySummary, onCopySummaryHTML]);
+
   // Shared button group for summary generator - always visible
   const summaryButtonGroup = (
     <SummaryGeneratorButtonGroup
@@ -305,6 +367,8 @@ export function SummaryPanel({
                   isDirty={isTitleDirty || (summaryRef.current?.isDirty || false) || notesIsDirty}
                   onSave={onSaveAll}
                   onCopy={handleCopyActiveTab}
+                  onCopyMarkdown={handleCopyActiveTabMarkdown}
+                  onCopyHTML={handleCopyActiveTabHTML}
                   onFind={() => {
                     console.log('Find in summary clicked');
                   }}
