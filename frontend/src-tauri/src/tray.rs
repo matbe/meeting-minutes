@@ -381,6 +381,32 @@ fn build_menu<R: Runtime>(
         }
     }
 
+    // Teams detection status (informational, Windows only)
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(teams_state) = app.try_state::<crate::teams_detector::TeamsDetectorState>() {
+            // Non-blocking: try to read state, skip label if locked
+            if let Ok(guard) = teams_state.get_lock().try_read() {
+                let label = match (&guard.state, &guard.meeting_title) {
+                    (crate::teams_detector::TeamsDetectionState::InMeeting, Some(title)) => {
+                        format!("Teams: Meeting - {}", title)
+                    }
+                    (crate::teams_detector::TeamsDetectionState::MeetingDetected, _) => {
+                        "Teams: Detecting meeting...".to_string()
+                    }
+                    _ => "Teams: Monitoring".to_string(),
+                };
+                builder = builder
+                    .item(&PredefinedMenuItem::separator(app)?)
+                    .item(
+                        &MenuItemBuilder::new(label)
+                            .enabled(false)
+                            .build(app)?,
+                    );
+            }
+        }
+    }
+
     builder
         .item(&PredefinedMenuItem::separator(app)?)
         .item(&MenuItemBuilder::with_id("open_window", "Open Main Window").build(app)?)

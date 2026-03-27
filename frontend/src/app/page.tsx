@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { RecordingControls } from '@/components/RecordingControls';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
@@ -17,11 +17,13 @@ import { useRecordingStateSync } from '@/hooks/useRecordingStateSync';
 import { useRecordingStart } from '@/hooks/useRecordingStart';
 import { useRecordingStop } from '@/hooks/useRecordingStop';
 import { useTranscriptRecovery } from '@/hooks/useTranscriptRecovery';
+import { useTeamsMeetingDetection } from '@/hooks/useTeamsMeetingDetection';
 import { TranscriptRecovery } from '@/components/TranscriptRecovery';
 import { indexedDBService } from '@/services/indexedDBService';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
 import { invoke } from '@tauri-apps/api/core';
+import { appDataDir } from '@tauri-apps/api/path';
 import dynamic from 'next/dynamic';
 import { Block } from '@blocknote/core';
 import { SummaryPanel } from '@/components/MeetingDetails/SummaryPanel';
@@ -58,6 +60,60 @@ export default function Home() {
     setIsRecordingState,
     setIsRecordingDisabled
   );
+
+  // Wrapper: sync notes React state from sessionStorage after recording starts
+  const handleRecordingStartWithNotes = useCallback(async (meetingTitleOverride?: string) => {
+    await handleRecordingStart(meetingTitleOverride);
+    // Re-sync notes state from sessionStorage (useRecordingStart clears old + sets new template)
+    const savedMarkdown = sessionStorage.getItem('recording_notes_markdown');
+    setRecordingNotesMarkdown(savedMarkdown || '');
+    const savedBlocksJson = sessionStorage.getItem('recording_notes_blocks');
+    if (savedBlocksJson) {
+      try {
+        setRecordingNotesBlocks(JSON.parse(savedBlocksJson) as Block[]);
+      } catch {
+        setRecordingNotesBlocks(null);
+      }
+    } else {
+      setRecordingNotesBlocks(null);
+    }
+  }, [handleRecordingStart]);
+
+  // Wrapper: append Teams end time to notes before stop processing (preserves user notes)
+  const handleRecordingStopWithNotes = useCallback(async (callApi: boolean = true) => {
+    const teamsMeetingTitle = sessionStorage.getItem('teams_meeting_title');
+    if (teamsMeetingTitle) {
+      const endTime = new Date().toLocaleString();
+      const currentNotes = recordingNotesMarkdown || sessionStorage.getItem('recording_notes_markdown') || '';
+      const updatedNotes = currentNotes.trimEnd() + `\n\n---\n\n**Ended:** ${endTime}\n`;
+      setRecordingNotesMarkdown(updatedNotes);
+      sessionStorage.setItem('recording_notes_markdown', updatedNotes);
+      sessionStorage.removeItem('teams_meeting_title');
+      sessionStorage.removeItem('teams_meeting_start');
+    }
+    await handleRecordingStop(callApi);
+  }, [handleRecordingStop, recordingNotesMarkdown]);
+
+  // Teams stop: must invoke stop_recording (normally RecordingControls does this)
+  const handleTeamsStopRecording = useCallback(async () => {
+    try {
+      const dataDir = await appDataDir();
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const savePath = `${dataDir}/recording-${timestamp}.wav`;
+      console.log('Teams stop: invoking stop_recording with path:', savePath);
+      await invoke('stop_recording', { args: { save_path: savePath } });
+    } catch (err) {
+      console.error('Failed to stop recording from Teams detection:', err);
+    }
+    await handleRecordingStopWithNotes(true);
+  }, [handleRecordingStopWithNotes]);
+
+  // Teams meeting detection (Windows only, controlled by user preference)
+  useTeamsMeetingDetection({
+    isRecording: isRecording || recordingState.isRecording,
+    onStartRecording: handleRecordingStartWithNotes,
+    onStopRecording: handleTeamsStopRecording,
+  });
 
   // Recovery hook
   const {
@@ -323,8 +379,8 @@ export default function Home() {
                   <div className="bg-white rounded-full shadow-lg flex items-center">
                     <RecordingControls
                       isRecording={recordingState.isRecording}
-                      onRecordingStop={(callApi = true) => handleRecordingStop(callApi)}
-                      onRecordingStart={handleRecordingStart}
+                      onRecordingStop={(callApi = true) => handleRecordingStopWithNotes(callApi)}
+                      onRecordingStart={handleRecordingStartWithNotes}
                       onStopInitiated={() => setIsStopping(true)}
                       barHeights={barHeights}
                       onTranscriptionError={(message) => {

@@ -43,6 +43,7 @@ pub mod console_utils;
 pub mod database;
 pub mod vocabulary_correction;
 pub mod notifications;
+pub mod teams_detector;
 pub mod ollama;
 pub mod onboarding;
 pub mod openai;
@@ -403,6 +404,7 @@ pub fn run() {
             None::<notifications::manager::NotificationManager<tauri::Wry>>,
         )) as NotificationManagerState<tauri::Wry>)
         .manage(audio::init_system_audio_state())
+        .manage(teams_detector::TeamsDetectorState::default())
         .manage(summary::summary_engine::ModelManagerState(Arc::new(tokio::sync::Mutex::new(None))))
         .setup(|_app| {
             log::info!("Application setup complete");
@@ -766,6 +768,10 @@ pub fn run() {
             audio::import::start_import_audio_command,
             audio::import::cancel_import_command,
             audio::import::is_import_in_progress_command,
+            // Teams meeting detection commands
+            teams_detector::start_teams_detection,
+            teams_detector::stop_teams_detection,
+            teams_detector::get_teams_detection_status,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

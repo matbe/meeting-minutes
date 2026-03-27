@@ -7,6 +7,7 @@ import { invoke } from "@tauri-apps/api/core"
 import Analytics from "@/lib/analytics"
 import AnalyticsConsentSwitch from "./AnalyticsConsentSwitch"
 import { useConfig, NotificationSettings } from "@/contexts/ConfigContext"
+import { usePlatform } from "@/hooks/usePlatform"
 
 export function PreferenceSettings() {
   const {
@@ -23,6 +24,66 @@ export function PreferenceSettings() {
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [previousNotificationsEnabled, setPreviousNotificationsEnabled] = useState<boolean | null>(null);
   const hasTrackedViewRef = useRef(false);
+
+  // Teams detection state (Windows only)
+  const platform = usePlatform();
+  const [teamsDetectionEnabled, setTeamsDetectionEnabled] = useState(false);
+  const [teamsUseDetectedTitles, setTeamsUseDetectedTitles] = useState(true);
+
+  // Load Teams detection preferences
+  useEffect(() => {
+    if (platform !== 'windows') return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const { Store } = await import('@tauri-apps/plugin-store');
+        const store = await Store.load('preferences.json');
+        const enabled = (await store.get<boolean>('teams_detection_enabled')) ?? false;
+        const useTitles = (await store.get<boolean>('teams_use_detected_titles')) ?? true;
+        if (!cancelled) {
+          setTeamsDetectionEnabled(enabled);
+          setTeamsUseDetectedTitles(useTitles);
+        }
+      } catch (err) {
+        console.error('Failed to load Teams detection prefs:', err);
+      }
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [platform]);
+
+  const handleTeamsDetectionToggle = async (enabled: boolean) => {
+    setTeamsDetectionEnabled(enabled);
+    try {
+      const { Store } = await import('@tauri-apps/plugin-store');
+      const store = await Store.load('preferences.json');
+      await store.set('teams_detection_enabled', enabled);
+      await store.save();
+
+      if (enabled) {
+        await invoke('start_teams_detection');
+      } else {
+        await invoke('stop_teams_detection');
+      }
+      await Analytics.track('teams_detection_toggled', { enabled: enabled.toString() });
+    } catch (err) {
+      console.error('Failed to toggle Teams detection:', err);
+      setTeamsDetectionEnabled(!enabled);
+    }
+  };
+
+  const handleTeamsUseTitlesToggle = async (enabled: boolean) => {
+    setTeamsUseDetectedTitles(enabled);
+    try {
+      const { Store } = await import('@tauri-apps/plugin-store');
+      const store = await Store.load('preferences.json');
+      await store.set('teams_use_detected_titles', enabled);
+      await store.save();
+    } catch (err) {
+      console.error('Failed to toggle Teams title preference:', err);
+      setTeamsUseDetectedTitles(!enabled);
+    }
+  };
 
   // Lazy load preferences on mount (only loads if not already cached)
   useEffect(() => {
@@ -344,6 +405,34 @@ export function PreferenceSettings() {
           <Switch checked={disableStartupCommunication} onCheckedChange={toggleDisableStartupCommunication} />
         </div>
       </div>
+
+      {/* Teams Meeting Detection (Windows only) */}
+      {platform === 'windows' && (
+        <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">Microsoft Teams Detection</h3>
+              <p className="text-sm text-gray-600">
+                Automatically detect Microsoft Teams meetings and prompt to start/stop recording
+              </p>
+            </div>
+            <Switch checked={teamsDetectionEnabled} onCheckedChange={handleTeamsDetectionToggle} />
+          </div>
+          {teamsDetectionEnabled && (
+            <div className="mt-4 pt-4 border-t border-gray-100">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-sm font-medium text-gray-900">Use detected meeting titles</h4>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    Use the Teams meeting name as the recording title instead of a timestamp
+                  </p>
+                </div>
+                <Switch checked={teamsUseDetectedTitles} onCheckedChange={handleTeamsUseTitlesToggle} />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Analytics Section */}
       <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">

@@ -10,7 +10,7 @@ import { showRecordingNotification } from '@/lib/recordingNotification';
 import { toast } from 'sonner';
 
 interface UseRecordingStartReturn {
-  handleRecordingStart: () => Promise<void>;
+  handleRecordingStart: (meetingTitleOverride?: string) => Promise<void>;
   isAutoStarting: boolean;
 }
 
@@ -80,7 +80,7 @@ export function useRecordingStart(
   }, []);
 
   // Handle manual recording start (from button click)
-  const handleRecordingStart = useCallback(async () => {
+  const handleRecordingStart = useCallback(async (meetingTitleOverride?: string) => {
     try {
       console.log('handleRecordingStart called - checking Parakeet model status');
 
@@ -108,25 +108,60 @@ export function useRecordingStart(
 
       console.log('Parakeet ready - setting up meeting title and state');
 
-      const randomTitle = generateMeetingTitle();
-      setMeetingTitle(randomTitle);
+      // Use override title from Teams detection (if enabled in settings) or generate one
+      let finalTitle: string;
+      let teamsDetectedTitle: string | undefined;
+
+      if (meetingTitleOverride) {
+        teamsDetectedTitle = meetingTitleOverride;
+        // Check user preference for using detected titles
+        try {
+          const { Store } = await import('@tauri-apps/plugin-store');
+          const store = await Store.load('preferences.json');
+          const useDetectedTitles = (await store.get<boolean>('teams_use_detected_titles')) ?? true;
+          if (useDetectedTitles) {
+            finalTitle = meetingTitleOverride;
+          } else {
+            finalTitle = generateMeetingTitle();
+          }
+        } catch {
+          finalTitle = meetingTitleOverride;
+        }
+      } else {
+        finalTitle = generateMeetingTitle();
+      }
+
+      setMeetingTitle(finalTitle);
 
       // Clear old recording session notes when starting a new recording
       // This ensures each recording starts with a clean notes slate
       sessionStorage.removeItem('recording_notes_markdown');
       sessionStorage.removeItem('recording_notes_blocks');
       sessionStorage.removeItem('current_recording_meeting_id');
+      sessionStorage.removeItem('teams_meeting_title');
+      sessionStorage.removeItem('teams_meeting_start');
       console.log('🗑️ Cleared previous recording notes from sessionStorage');
+
+      // If Teams meeting was detected, store a notes template with the meeting title
+      // This is done BEFORE starting the recording so the notes are available immediately
+      if (teamsDetectedTitle) {
+        const startTime = new Date().toLocaleString();
+        const notesTemplate = `### ${teamsDetectedTitle}\n\n**Started:** ${startTime}\n\n---\n\n`;
+        sessionStorage.setItem('recording_notes_markdown', notesTemplate);
+        sessionStorage.setItem('teams_meeting_title', teamsDetectedTitle);
+        sessionStorage.setItem('teams_meeting_start', startTime);
+        console.log('📝 Stored Teams meeting notes template');
+      }
 
       // Set STARTING status before initiating backend recording
       setStatus(RecordingStatus.STARTING, 'Initializing recording...');
 
       // Start the actual backend recording
-      console.log('Starting backend recording with meeting:', randomTitle);
+      console.log('Starting backend recording with meeting:', finalTitle);
       await recordingService.startRecordingWithDevices(
         selectedDevices?.micDevice || null,
         selectedDevices?.systemDevice || null,
-        randomTitle
+        finalTitle
       );
       console.log('Backend recording started successfully');
 
