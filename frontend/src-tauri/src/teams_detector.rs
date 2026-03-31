@@ -97,6 +97,10 @@ pub struct DetectorInner {
     pub state: TeamsDetectionState,
     pub meeting_title: Option<String>,
     meeting_started_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Timestamp when the last meeting ended. Used to enforce a cooldown
+    /// period so post-meeting Teams screens don't trigger an immediate
+    /// re-detection.
+    last_ended_at: Option<chrono::DateTime<chrono::Utc>>,
     consecutive_detected: u32,
     consecutive_absent: u32,
     background: BackgroundTask,
@@ -108,6 +112,7 @@ impl Default for DetectorInner {
             state: TeamsDetectionState::Idle,
             meeting_title: None,
             meeting_started_at: None,
+            last_ended_at: None,
             consecutive_detected: 0,
             consecutive_absent: 0,
             background: BackgroundTask::default(),
@@ -268,6 +273,10 @@ fn detect_teams_meeting() -> Option<String> {
 
 const POLL_INTERVAL_SECS: u64 = 4;
 const DEBOUNCE_THRESHOLD: u32 = 2;
+/// Seconds to wait after a meeting ends before allowing new detection.
+/// Prevents post-meeting Teams screens (summary, feedback) from being
+/// falsely detected as a new meeting.
+const POST_MEETING_COOLDOWN_SECS: i64 = 45;
 
 async fn poll_loop<R: Runtime>(app: AppHandle<R>, state: Arc<RwLock<DetectorInner>>) {
     loop {
@@ -281,7 +290,23 @@ async fn poll_loop<R: Runtime>(app: AppHandle<R>, state: Arc<RwLock<DetectorInne
 
         match (&inner.state, meeting.as_ref()) {
             // Currently idle and we see a meeting → start debouncing
+            // BUT skip if we're within the post-meeting cooldown period
             (TeamsDetectionState::Idle, Some(title)) => {
+                if let Some(ended_at) = inner.last_ended_at {
+                    let elapsed = (chrono::Utc::now() - ended_at).num_seconds();
+                    if elapsed < POST_MEETING_COOLDOWN_SECS {
+                        log::debug!(
+                            "Ignoring meeting window during post-meeting cooldown ({}/{}s)",
+                            elapsed,
+                            POST_MEETING_COOLDOWN_SECS
+                        );
+                        // Stay idle, don't start detection cycle
+                        continue;
+                    }
+                    // Cooldown expired, clear it
+                    inner.last_ended_at = None;
+                }
+
                 inner.consecutive_detected += 1;
                 inner.consecutive_absent = 0;
                 inner.meeting_title = Some(title.clone());
@@ -331,9 +356,10 @@ async fn poll_loop<R: Runtime>(app: AppHandle<R>, state: Arc<RwLock<DetectorInne
                 inner.consecutive_absent += 1;
                 inner.consecutive_detected = 0;
                 if inner.consecutive_absent >= DEBOUNCE_THRESHOLD {
+                    let now = chrono::Utc::now();
                     let duration = inner
                         .meeting_started_at
-                        .map(|t| (chrono::Utc::now() - t).num_seconds())
+                        .map(|t| (now - t).num_seconds())
                         .unwrap_or(0);
                     log::info!(
                         "Teams meeting ended (duration: {}s)",
@@ -342,13 +368,14 @@ async fn poll_loop<R: Runtime>(app: AppHandle<R>, state: Arc<RwLock<DetectorInne
                     let _ = app.emit(
                         "teams-meeting-ended",
                         serde_json::json!({
-                            "ended_at": chrono::Utc::now().to_rfc3339(),
+                            "ended_at": now.to_rfc3339(),
                             "duration_seconds": duration,
                         }),
                     );
                     inner.state = TeamsDetectionState::Idle;
                     inner.meeting_title = None;
                     inner.meeting_started_at = None;
+                    inner.last_ended_at = Some(now);
                     inner.consecutive_detected = 0;
                     inner.consecutive_absent = 0;
                 } else {
@@ -359,9 +386,10 @@ async fn poll_loop<R: Runtime>(app: AppHandle<R>, state: Arc<RwLock<DetectorInne
             (TeamsDetectionState::MeetingEnding, None) => {
                 inner.consecutive_absent += 1;
                 if inner.consecutive_absent >= DEBOUNCE_THRESHOLD {
+                    let now = chrono::Utc::now();
                     let duration = inner
                         .meeting_started_at
-                        .map(|t| (chrono::Utc::now() - t).num_seconds())
+                        .map(|t| (now - t).num_seconds())
                         .unwrap_or(0);
                     log::info!(
                         "Teams meeting ended (duration: {}s)",
@@ -370,13 +398,14 @@ async fn poll_loop<R: Runtime>(app: AppHandle<R>, state: Arc<RwLock<DetectorInne
                     let _ = app.emit(
                         "teams-meeting-ended",
                         serde_json::json!({
-                            "ended_at": chrono::Utc::now().to_rfc3339(),
+                            "ended_at": now.to_rfc3339(),
                             "duration_seconds": duration,
                         }),
                     );
                     inner.state = TeamsDetectionState::Idle;
                     inner.meeting_title = None;
                     inner.meeting_started_at = None;
+                    inner.last_ended_at = Some(now);
                     inner.consecutive_detected = 0;
                     inner.consecutive_absent = 0;
                 }
@@ -451,6 +480,7 @@ pub async fn stop_teams_detection<R: Runtime>(app: AppHandle<R>) -> Result<(), S
         guard.state = TeamsDetectionState::Idle;
         guard.meeting_title = None;
         guard.meeting_started_at = None;
+        guard.last_ended_at = None;
         guard.consecutive_detected = 0;
         guard.consecutive_absent = 0;
         log::info!("Teams meeting detection stopped");

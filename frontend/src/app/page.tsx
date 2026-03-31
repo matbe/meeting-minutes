@@ -85,7 +85,22 @@ export default function Home() {
     if (teamsMeetingTitle) {
       const endTime = new Date().toLocaleString();
       const currentNotes = recordingNotesMarkdown || sessionStorage.getItem('recording_notes_markdown') || '';
-      const updatedNotes = currentNotes.trimEnd() + `\n\n---\n\n**Ended:** ${endTime}\n`;
+
+      // Insert "**Ended:**" right after the "**Started:**" line so the
+      // timestamps stay together at the top, rather than appending at the
+      // bottom where it gets buried under user notes.
+      const startedPattern = /(\*\*Started:\*\*[^\n]*\n)/;
+      let updatedNotes: string;
+      if (startedPattern.test(currentNotes)) {
+        updatedNotes = currentNotes.replace(
+          startedPattern,
+          `$1**Ended:** ${endTime}\n`
+        );
+      } else {
+        // Fallback: append at the end if template wasn't found
+        updatedNotes = currentNotes.trimEnd() + `\n\n**Ended:** ${endTime}\n`;
+      }
+
       setRecordingNotesMarkdown(updatedNotes);
       sessionStorage.setItem('recording_notes_markdown', updatedNotes);
       sessionStorage.removeItem('teams_meeting_title');

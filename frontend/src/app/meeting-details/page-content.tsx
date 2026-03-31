@@ -69,7 +69,17 @@ export default function PageContent({
     const savedBlocksJson = sessionStorage.getItem('recording_notes_blocks');
     const recordingMeetingId = sessionStorage.getItem('current_recording_meeting_id');
     
-    if (savedMarkdown && savedMarkdown.trim()) {
+    // Only persist if we have notes AND the recording has finished (recordingMeetingId is set).
+    // Without a recordingMeetingId the recording is still in progress and the notes belong
+    // to the *current* recording, not the meeting page being viewed – saving them here
+    // would attach them to the wrong meeting (especially when the previous meeting has no notes).
+    if (savedMarkdown && savedMarkdown.trim() && recordingMeetingId) {
+      // Only persist to this page's meeting if it matches the recording that produced the notes
+      if (recordingMeetingId !== meeting.id) {
+        console.log('📝 Recording notes belong to meeting', recordingMeetingId, ', skipping save to', meeting.id);
+        return;
+      }
+
       console.log('📝 Found recording notes in sessionStorage, saving to DB...');
       let blocks: any[] | undefined;
       if (savedBlocksJson) {
@@ -79,13 +89,10 @@ export default function PageContent({
       }
 
       const persistNotes = async () => {
-        // Use the meeting ID from the recording that generated these notes, not the current page's meeting ID
-        // This prevents notes from being attached to the wrong meeting if user navigated away
-        const targetMeetingId = recordingMeetingId || meeting.id;
-        console.log('📝 Persisting recording notes to meeting:', targetMeetingId, '(current page meeting:', meeting.id, ')');
+        console.log('📝 Persisting recording notes to meeting:', recordingMeetingId);
         
         try {
-          const saveSucceeded = await notes.saveNotes(savedMarkdown, blocks, targetMeetingId);
+          const saveSucceeded = await notes.saveNotes(savedMarkdown, blocks, recordingMeetingId);
           if (saveSucceeded) {
             // FIXED: Don't clear sessionStorage here - let it persist so notes stay visible in the UI
             // SessionStorage will be cleared when user starts a NEW recording (in useRecordingStart)
