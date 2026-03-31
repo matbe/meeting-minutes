@@ -8,6 +8,9 @@ const OVERLAY_WIDTH = 370;
 const OVERLAY_HEIGHT = 160;
 const OVERLAY_MARGIN = 16;
 
+/** Guard: prevent overlapping showOverlayWindow calls from racing */
+let overlayCreationInProgress = false;
+
 /**
  * Show a small always-on-top overlay popup in the bottom-right corner of the
  * screen. The overlay is a separate Tauri WebviewWindow so it renders on top
@@ -22,6 +25,9 @@ async function showOverlayWindow(payload: {
   title: string;
   subtitle: string;
 }) {
+  if (overlayCreationInProgress) return;
+  overlayCreationInProgress = true;
+
   try {
     const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow');
     const { currentMonitor } = await import('@tauri-apps/api/window');
@@ -76,6 +82,8 @@ async function showOverlayWindow(payload: {
     });
   } catch (err) {
     console.error('Failed to create overlay window:', err);
+  } finally {
+    overlayCreationInProgress = false;
   }
 }
 
@@ -131,9 +139,18 @@ export function useTeamsMeetingDetection({
   const [detectedMeeting, setDetectedMeeting] = useState<DetectedMeeting | null>(null);
   const [isDetectionActive, setIsDetectionActive] = useState(false);
 
-  // Refs to keep latest values inside event callbacks
+  // ── Refs for values used inside event callbacks ──
+  // Storing callbacks in refs means the event-listener effect only depends on
+  // `isDetectionActive` and never re-registers listeners when the callbacks
+  // change identity (which happens every time recordingNotesMarkdown changes).
   const isRecordingRef = useRef(isRecording);
   isRecordingRef.current = isRecording;
+
+  const onStartRecordingRef = useRef(onStartRecording);
+  onStartRecordingRef.current = onStartRecording;
+
+  const onStopRecordingRef = useRef(onStopRecording);
+  onStopRecordingRef.current = onStopRecording;
 
   const startDetection = useCallback(async () => {
     try {
@@ -179,16 +196,22 @@ export function useTeamsMeetingDetection({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Listen for events
+  // Listen for Rust-side events and overlay actions.
+  // IMPORTANT: This effect must NOT depend on callback props — they are
+  // accessed via refs so the listeners are registered exactly once when
+  // detection becomes active, and torn down when it stops.
   useEffect(() => {
     if (!isDetectionActive) return;
 
+    let cancelled = false;
     const unlisteners: UnlistenFn[] = [];
 
     const setup = async () => {
+      // ── teams-meeting-detected ──
       const unlistenDetected = await listen<MeetingDetectedPayload>(
         'teams-meeting-detected',
         (event) => {
+          if (cancelled) return;
           const { meeting_title, detected_at } = event.payload;
           setDetectedMeeting({ title: meeting_title, detectedAt: detected_at });
 
@@ -212,7 +235,7 @@ export function useTeamsMeetingDetection({
                       onClick={async () => {
                         toast.dismiss('teams-meeting-prompt');
                         try {
-                          await onStartRecording(meeting_title ?? undefined);
+                          await onStartRecordingRef.current(meeting_title ?? undefined);
                         } catch (err) {
                           console.error('Failed to start recording from Teams prompt:', err);
                         }
@@ -237,11 +260,14 @@ export function useTeamsMeetingDetection({
           }
         },
       );
+      if (cancelled) { unlistenDetected(); return; }
       unlisteners.push(unlistenDetected);
 
+      // ── teams-meeting-ended ──
       const unlistenEnded = await listen<MeetingEndedPayload>(
         'teams-meeting-ended',
         (event) => {
+          if (cancelled) return;
           const { duration_seconds } = event.payload;
           setDetectedMeeting(null);
 
@@ -265,7 +291,7 @@ export function useTeamsMeetingDetection({
                       onClick={async () => {
                         toast.dismiss('teams-meeting-ended-prompt');
                         try {
-                          await onStopRecording();
+                          await onStopRecordingRef.current();
                         } catch (err) {
                           console.error('Failed to stop recording from Teams prompt:', err);
                         }
@@ -290,12 +316,14 @@ export function useTeamsMeetingDetection({
           }
         },
       );
+      if (cancelled) { unlistenEnded(); return; }
       unlisteners.push(unlistenEnded);
 
-      // Listen for actions from the overlay window
+      // ── overlay button actions ──
       const unlistenOverlayAction = await listen<{ action: string; meetingTitle?: string }>(
         'teams-overlay-action',
         async (event) => {
+          if (cancelled) return;
           const { action, meetingTitle } = event.payload;
 
           // Destroy overlay FIRST and wait for it to complete before proceeding.
@@ -305,14 +333,14 @@ export function useTeamsMeetingDetection({
           if (action === 'start-recording') {
             toast.dismiss('teams-meeting-prompt');
             try {
-              await onStartRecording(meetingTitle);
+              await onStartRecordingRef.current(meetingTitle);
             } catch (err) {
               console.error('Failed to start recording from overlay:', err);
             }
           } else if (action === 'stop-recording') {
             toast.dismiss('teams-meeting-ended-prompt');
             try {
-              await onStopRecording();
+              await onStopRecordingRef.current();
             } catch (err) {
               console.error('Failed to stop recording from overlay:', err);
             }
@@ -322,15 +350,19 @@ export function useTeamsMeetingDetection({
           }
         },
       );
+      if (cancelled) { unlistenOverlayAction(); return; }
       unlisteners.push(unlistenOverlayAction);
     };
 
     setup();
 
     return () => {
+      cancelled = true;
       unlisteners.forEach((fn) => fn());
+      // Destroy any open overlay when listeners are torn down
+      closeOverlayWindow();
     };
-  }, [isDetectionActive, onStartRecording, onStopRecording]);
+  }, [isDetectionActive]);
 
   // Cleanup on unmount — stop detection and destroy any leftover overlay
   useEffect(() => {

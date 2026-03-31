@@ -193,6 +193,8 @@
         window.__TAURI__.window.getCurrentWindow().destroy();
       }
     } catch (_) { /* ignore */ }
+    // Last-resort fallback: try window.close() if Tauri API is unavailable
+    try { window.close(); } catch (_) { /* ignore */ }
   }
 
   function startAutoDismiss() {
@@ -214,8 +216,11 @@
   document.getElementById('dismissBtn2').addEventListener('click', function () { emitAction('dismiss'); });
 
   // ── Listen for data from main window ──
+  var dataReceived = false;
+
   function onPayload(payload) {
     if (!payload) return;
+    dataReceived = true;
 
     meetingTitle = (payload.title || '').replace(/^Teams:\s*/, '');
 
@@ -248,6 +253,15 @@
   }
 
   init();
+
+  // Hard safety-net: if the overlay never receives its payload within 5 s
+  // (e.g. orphaned by a racing showOverlayWindow call), self-destruct so
+  // the user never gets stuck with an un-dismissable blank popup.
+  setTimeout(function () {
+    if (!dataReceived) {
+      destroySelf();
+    }
+  }, 5000);
 })();
 </script>
 </body>
