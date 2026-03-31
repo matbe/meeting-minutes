@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Meetily</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    width: 100%; height: 100%;
+    overflow: hidden;
+    background: transparent;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    color: #f1f5f9;
+    user-select: none;
+    cursor: default;
+  }
+
+  /* ── Card ── */
+  #card {
+    position: relative;
+    width: 100%; height: 100%;
+    background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.12);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.55), 0 0 0 1px rgba(0,0,0,0.2);
+    padding: 16px 20px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    opacity: 0;
+    transform: translateY(12px);
+    animation: slideIn 0.25s ease-out 0.05s forwards;
+  }
+
+  @keyframes slideIn {
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ── Header row ── */
+  .header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+
+  .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .dot.detected { background: #22c55e; box-shadow: 0 0 8px #22c55e80; }
+  .dot.ended    { background: #f97316; box-shadow: 0 0 8px #f9731680; }
+
+  .brand {
+    font-size: 11px; font-weight: 600;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .close-btn {
+    margin-left: auto;
+    background: none; border: none;
+    color: #64748b; cursor: pointer;
+    font-size: 15px; line-height: 1;
+    padding: 4px 6px;
+    border-radius: 4px;
+    transition: background 0.15s, color 0.15s;
+  }
+  .close-btn:hover { background: rgba(255,255,255,0.1); color: #cbd5e1; }
+
+  /* ── Body text ── */
+  .title {
+    font-size: 14px; font-weight: 600; line-height: 1.3;
+    margin-bottom: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .subtitle { font-size: 12px; color: #94a3b8; }
+
+  /* ── Button row ── */
+  .actions { display: flex; gap: 8px; margin-top: 12px; }
+
+  .btn {
+    flex: 1;
+    padding: 8px 0;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: filter 0.15s, transform 0.1s;
+  }
+  .btn:hover  { filter: brightness(1.15); }
+  .btn:active { transform: scale(0.97); }
+
+  .btn-primary   { background: #dc2626; color: #fff; }
+  .btn-stop      { background: #1e293b; color: #f1f5f9; border: 1px solid rgba(255,255,255,0.2); }
+  .btn-secondary {
+    background: rgba(255,255,255,0.08);
+    color: #cbd5e1;
+    border: 1px solid rgba(255,255,255,0.12);
+    font-weight: 500;
+  }
+
+  /* ── Hidden state ── */
+  .hidden { display: none !important; }
+
+  /* ── Auto-dismiss progress ── */
+  .progress-bar {
+    position: absolute;
+    bottom: 0; left: 12px; right: 12px;
+    height: 2px;
+    background: rgba(255,255,255,0.06);
+    border-radius: 1px;
+    overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%;
+    background: rgba(148,163,184,0.4);
+    width: 100%;
+    animation: shrink 30s linear forwards;
+  }
+  @keyframes shrink { to { width: 0%; } }
+</style>
+</head>
+<body>
+  <div id="card" data-tauri-drag-region>
+    <!-- Header -->
+    <div>
+      <div class="header">
+        <div id="dot" class="dot detected"></div>
+        <span class="brand">Meetily</span>
+        <button class="close-btn" id="closeBtn" title="Dismiss">&times;</button>
+      </div>
+      <div class="title" id="title">Meeting detected</div>
+      <div class="subtitle" id="subtitle">Would you like to start recording?</div>
+    </div>
+
+    <!-- Buttons: meeting-detected mode -->
+    <div class="actions" id="detected-actions">
+      <button class="btn btn-primary" id="startBtn">&#9679; Start Recording</button>
+      <button class="btn btn-secondary" id="dismissBtn1">Dismiss</button>
+    </div>
+
+    <!-- Buttons: meeting-ended mode -->
+    <div class="actions hidden" id="ended-actions">
+      <button class="btn btn-stop" id="stopBtn">&#9632; Stop Recording</button>
+      <button class="btn btn-secondary" id="dismissBtn2">Continue</button>
+    </div>
+
+    <!-- Auto-dismiss progress -->
+    <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+  </div>
+
+<script>
+(function () {
+  // ── State ──
+  let meetingTitle = '';
+  let autoDismissTimer = null;
+  const AUTO_DISMISS_MS = 30000;
+
+  // ── DOM refs ──
+  const dot           = document.getElementById('dot');
+  const titleEl       = document.getElementById('title');
+  const subtitleEl    = document.getElementById('subtitle');
+  const detectedActs  = document.getElementById('detected-actions');
+  const endedActs     = document.getElementById('ended-actions');
+  const progressFill  = document.getElementById('progressFill');
+
+  // ── Helpers ──
+  function emitAction(action) {
+    clearTimeout(autoDismissTimer);
+    // Disable all buttons immediately so user can't double-click
+    var btns = document.querySelectorAll('.btn, .close-btn');
+    btns.forEach(function (b) { b.disabled = true; b.style.opacity = '0.5'; b.style.pointerEvents = 'none'; });
+
+    if (window.__TAURI__ && window.__TAURI__.event) {
+      window.__TAURI__.event.emit('teams-overlay-action', {
+        action: action,
+        meetingTitle: meetingTitle,
+      });
+    }
+
+    // The main window will destroy us. Self-destruct as a safety net
+    // only if the main window fails to close us within 1 second.
+    setTimeout(function () { destroySelf(); }, 1000);
+  }
+
+  function destroySelf() {
+    clearTimeout(autoDismissTimer);
+    try {
+      if (window.__TAURI__ && window.__TAURI__.window) {
+        window.__TAURI__.window.getCurrentWindow().destroy();
+      }
+    } catch (_) { /* ignore */ }
+  }
+
+  function startAutoDismiss() {
+    clearTimeout(autoDismissTimer);
+    // Restart CSS animation
+    progressFill.style.animation = 'none';
+    void progressFill.offsetHeight;           // reflow
+    progressFill.style.animation = 'shrink ' + (AUTO_DISMISS_MS / 1000) + 's linear forwards';
+    autoDismissTimer = setTimeout(function () {
+      emitAction('dismiss');
+    }, AUTO_DISMISS_MS);
+  }
+
+  // ── Button handlers ──
+  document.getElementById('closeBtn').addEventListener('click', function () { emitAction('dismiss'); });
+  document.getElementById('startBtn').addEventListener('click', function () { emitAction('start-recording'); });
+  document.getElementById('dismissBtn1').addEventListener('click', function () { emitAction('dismiss'); });
+  document.getElementById('stopBtn').addEventListener('click', function () { emitAction('stop-recording'); });
+  document.getElementById('dismissBtn2').addEventListener('click', function () { emitAction('dismiss'); });
+
+  // ── Listen for data from main window ──
+  function onPayload(payload) {
+    if (!payload) return;
+
+    meetingTitle = (payload.title || '').replace(/^Teams:\s*/, '');
+
+    titleEl.textContent  = payload.title  || 'Meeting detected';
+    subtitleEl.textContent = payload.subtitle || '';
+
+    if (payload.mode === 'meeting-ended') {
+      dot.className = 'dot ended';
+      detectedActs.classList.add('hidden');
+      endedActs.classList.remove('hidden');
+    } else {
+      dot.className = 'dot detected';
+      detectedActs.classList.remove('hidden');
+      endedActs.classList.add('hidden');
+    }
+
+    startAutoDismiss();
+  }
+
+  // Wait for the Tauri global API to be available, then listen
+  function init() {
+    if (window.__TAURI__ && window.__TAURI__.event) {
+      window.__TAURI__.event.listen('teams-overlay-show', function (event) {
+        onPayload(event.payload);
+      });
+    } else {
+      // Retry shortly — the global script may not have injected yet
+      setTimeout(init, 50);
+    }
+  }
+
+  init();
+})();
+</script>
+</body>
+</html>
