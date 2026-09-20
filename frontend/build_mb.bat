@@ -47,7 +47,7 @@ if exist "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxi
 ) else if exist "C:\Program Files (x86)\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat" (
     call "C:\Program Files (x86)\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat" >nul 2>&1
 ) else if exist "C:\Program Files (x86)\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\Build\vcvars64.bat" (
-    call "C:\Program Files (x86)\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\Build\vcvars64.bat" >nul 2>&1
+    call "C:\Program Files\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\Build\vcvars64.bat" >nul 2>&1
 ) else if exist "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvars64.bat" (
     call "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvars64.bat" >nul 2>&1
 )
@@ -69,21 +69,23 @@ if "!CHECK!" == "true" (
     exit /b 0
 )
 
-echo Building llama-helper sidecar...
-set "HELPER_DIR=..\llama-helper"
-if exist "%HELPER_DIR%" (
-    pushd "%HELPER_DIR%"
-    call cargo build --release
-    if !errorlevel! neq 0 (
-        echo Error: llama-helper build failed
+for /f "tokens=2" %%i in ('rustc -vV ^| findstr "host:"') do set TARGET_TRIPLE=%%i
+set "BINARIES_DIR=src-tauri\binaries"
+if not exist "!BINARIES_DIR!\llama-helper-!TARGET_TRIPLE!.exe" (
+    echo Building llama-helper sidecar...
+    set "HELPER_DIR=..\llama-helper"
+    if exist "!HELPER_DIR!" (
+        pushd "!HELPER_DIR!"
+        call cargo build --release
+        if !errorlevel! neq 0 (
+            echo Error: llama-helper build failed
+            popd
+            exit /b 1
+        )
         popd
-        exit /b 1
+        if not exist "!BINARIES_DIR!" mkdir "!BINARIES_DIR!"
+        copy /y "..\target\release\llama-helper.exe" "!BINARIES_DIR!\llama-helper-!TARGET_TRIPLE!.exe" >nul
     )
-    popd
-    for /f "tokens=2" %%i in ('rustc -vV ^| findstr "host:"') do set TARGET_TRIPLE=%%i
-    set "BINARIES_DIR=src-tauri\binaries"
-    if not exist "!BINARIES_DIR!" mkdir "!BINARIES_DIR!"
-    copy /y "..\target\release\llama-helper.exe" "!BINARIES_DIR!\llama-helper-!TARGET_TRIPLE!.exe" >nul
 )
 
 if "!GPU_AUTO!" == "true" (
