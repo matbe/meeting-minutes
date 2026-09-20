@@ -234,10 +234,11 @@ async fn resolve_meeting_folder(
     pool: &sqlx::SqlitePool,
     meeting_id: &str,
 ) -> Result<MeetingFolderResolution, String> {
-    let meeting = MeetingsRepository::get_meeting_metadata(pool, meeting_id)
-        .await
-        .map_err(|e| format!("Failed to load meeting metadata: {}", e))?
-        .ok_or_else(|| format!("Meeting not found: {}", meeting_id))?;
+    let meeting = match MeetingsRepository::get_meeting_metadata(pool, meeting_id).await {
+        Ok(Some(m)) => m,
+        Ok(None) => return Ok(MeetingFolderResolution::NoFolder),
+        Err(e) => return Err(format!("Failed to load meeting metadata: {}", e)),
+    };
 
     let Some(folder_path) = meeting.folder_path.filter(|p| !p.trim().is_empty()) else {
         return Ok(MeetingFolderResolution::NoFolder);

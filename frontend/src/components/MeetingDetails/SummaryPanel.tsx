@@ -158,6 +158,11 @@ export function SummaryPanel({
     : 'Uses dominant transcript language';
 
   useEffect(() => {
+    if (summaryControlsDisabled || !meeting.id || meeting.id === 'recording-session') {
+      setSummaryLang(null);
+      return;
+    }
+
     let cancelled = false;
     const loadVersion = languageLoadVersionRef.current + 1;
     languageLoadVersionRef.current = loadVersion;
@@ -183,7 +188,7 @@ export function SummaryPanel({
     return () => {
       cancelled = true;
     };
-  }, [meeting.id]);
+  }, [meeting.id, summaryControlsDisabled]);
 
   const persistLatestLanguageSelection = async () => {
     if (languageSaveLoopRunningRef.current) return;
