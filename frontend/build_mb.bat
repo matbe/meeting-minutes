@@ -69,6 +69,23 @@ if "!CHECK!" == "true" (
     exit /b 0
 )
 
+echo Building llama-helper sidecar...
+set "HELPER_DIR=..\llama-helper"
+if exist "%HELPER_DIR%" (
+    pushd "%HELPER_DIR%"
+    call cargo build --release
+    if !errorlevel! neq 0 (
+        echo Error: llama-helper build failed
+        popd
+        exit /b 1
+    )
+    popd
+    for /f "tokens=2" %%i in ('rustc -vV ^| findstr "host:"') do set TARGET_TRIPLE=%%i
+    set "BINARIES_DIR=src-tauri\binaries"
+    if not exist "!BINARIES_DIR!" mkdir "!BINARIES_DIR!"
+    copy /y "..\target\release\llama-helper.exe" "!BINARIES_DIR!\llama-helper-!TARGET_TRIPLE!.exe" >nul
+)
+
 if "!GPU_AUTO!" == "true" (
     echo Building with AUTO-DETECTED GPU support...
     echo WARNING: This binary will ONLY run on machines with the same GPU libraries installed!

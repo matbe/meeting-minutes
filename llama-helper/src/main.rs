@@ -147,7 +147,7 @@ fn detect_vram_gb() -> f32 {
         }
     }
 
-    /// TODO: Vulkan VRAM detection
+    // TODO: Vulkan VRAM detection
 
     eprintln!("VRAM detection not available, using conservative estimate");
     4.0 // Conservative fallback
@@ -410,10 +410,12 @@ impl ModelState {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u32;
+        let n_vocab = model.n_vocab();
         let sampler = if sampling.temperature <= 0.0 {
             if sampling.uses_penalties() {
                 LlamaSampler::chain_simple([
                     LlamaSampler::penalties(
+                        n_vocab,
                         sampling.penalty_last_n,
                         sampling.repeat_penalty,
                         sampling.frequency_penalty,
@@ -427,6 +429,7 @@ impl ModelState {
         } else if sampling.uses_penalties() {
             LlamaSampler::chain_simple([
                 LlamaSampler::penalties(
+                    n_vocab,
                     sampling.penalty_last_n,
                     sampling.repeat_penalty,
                     sampling.frequency_penalty,
