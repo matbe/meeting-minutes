@@ -125,6 +125,14 @@ if !errorlevel! neq 0 (
     exit /b 1
 )
 
+REM Ensure bundled templates are present in release output directory
+if exist "src-tauri\templates-generated" (
+    if not exist "..\target\release\templates-generated" mkdir "..\target\release\templates-generated" >nul 2>&1
+    copy /y "src-tauri\templates-generated\*.json" "..\target\release\templates-generated\" >nul 2>&1
+    if not exist "..\target\release\templates" mkdir "..\target\release\templates" >nul 2>&1
+    copy /y "src-tauri\templates-generated\*.json" "..\target\release\templates\" >nul 2>&1
+)
+
 echo.
 echo Build completed!
 
