@@ -50,6 +50,7 @@ struct SpeakerStats {
 /// Response from the Python diarization API
 #[derive(Debug, Clone, Deserialize)]
 struct DiarizationApiResponse {
+    #[allow(dead_code)]
     status: String,
     result: Option<DiarizationResult>,
 }
@@ -638,7 +639,7 @@ pub async fn load_persisted_speaker_labels(
     let pool = state.db_manager.pool();
 
     // Load speaker labels from database
-    let rows: Vec<(String, String, String)> = sqlx::query_as(
+    let _rows: Vec<(String, String, String)> = sqlx::query_as(
         "SELECT speaker_id, speaker_label, meeting_id FROM speaker_labels WHERE meeting_id = ?"
     )
     .bind(&meeting_id)

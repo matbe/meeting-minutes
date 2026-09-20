@@ -67,7 +67,7 @@ async fn run_nut_whisper_transcription_loop<R: Runtime>(
 ) {
     let mut sequence_id: u64 = 0;
     let mut speech_detected_emitted = false;
-    let recording_start = std::time::Instant::now();
+    let _recording_start = std::time::Instant::now();
     let mut total_audio_sent: u64 = 0;
 
     info!("🥜 NutWhisper transcription loop started");

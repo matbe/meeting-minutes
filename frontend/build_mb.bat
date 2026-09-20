@@ -42,7 +42,7 @@ set "LIBCLANG_PATH=C:\Program Files\LLVM\bin"
 if exist "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat" (
     call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat" >nul 2>&1
 ) else if exist "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat" (
-    set "LIBCLANG_PATH=C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\Llvm\x64\lib"
+    set "LIBCLANG_PATH=C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\Llvm\x64\bin"
     call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat" >nul 2>&1
 ) else if exist "C:\Program Files (x86)\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat" (
     call "C:\Program Files (x86)\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat" >nul 2>&1
@@ -84,7 +84,7 @@ if "!GPU_CUDA!" == "true" (
     set "CUDAARCHS=75;80;86;89;90;100;120"
     set "CMAKE_CUDA_STANDARD=17"
     set "CMAKE_CXX_STANDARD=17"
-    set "CUDAFLAGS=-std=c++17
+    set "CUDAFLAGS=-std=c++17"
     call pnpm run tauri:build:cuda
     goto :build_done
 )

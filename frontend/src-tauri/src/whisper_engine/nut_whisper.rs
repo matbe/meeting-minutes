@@ -347,7 +347,7 @@ impl NutWhisper {
 
         // Calculate chunk duration
         let chunk_samples = chunk.samples.len();
-        let chunk_duration = chunk_samples as f32 / self.config.sample_rate as f32;
+        let _chunk_duration = chunk_samples as f32 / self.config.sample_rate as f32;
 
         // Check if audio has enough energy to be worth transcribing
         if !Self::has_sufficient_energy(&chunk.samples) {
@@ -943,6 +943,7 @@ impl NutWhisperPipeline {
                       sample_rate, chunk_duration, samples_per_chunk);
 
             let mut audio_buffer: Vec<f32> = Vec::new();
+            #[allow(unused_assignments)]
             let mut current_source = String::new();
             let mut chunks_received: u64 = 0;
             let mut chunks_processed: u64 = 0;

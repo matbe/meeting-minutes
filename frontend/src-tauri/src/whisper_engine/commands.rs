@@ -1,5 +1,5 @@
 use crate::whisper_engine::{is_download_cancelled, CancelDownloadOutcome, ModelInfo, WhisperEngine};
-use crate::whisper_engine::nut_whisper::{NutWhisper, NutWhisperConfig, NutWhisperPipeline, NutAudioChunk};
+use crate::whisper_engine::nut_whisper::{NutWhisperConfig, NutWhisperPipeline};
 use std::sync::{Arc, Mutex};
 use std::path::PathBuf;
 use tauri::{command, Emitter, Manager, AppHandle, Runtime};

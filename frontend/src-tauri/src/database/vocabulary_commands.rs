@@ -4,7 +4,7 @@ use tauri::{AppHandle, Manager, Runtime};
 
 use crate::{
     database::{
-        models::{VocabularyEntry, VocabularyEntryParsed, VocabularySet},
+        models::{VocabularyEntryParsed, VocabularySet},
         repositories::vocabulary::VocabularyRepository,
     },
     state::AppState,
