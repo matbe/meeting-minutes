@@ -2,14 +2,15 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
-import { Summary, SummaryResponse, Speaker, TranscriptSegmentData, SpeakerLabel } from '@/types';
+import { MeetingSummary, SummaryProcessResponse, Speaker, TranscriptSegmentData, SpeakerLabel } from '@/types';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import Analytics from '@/lib/analytics';
 import { toast } from 'sonner';
 import { TranscriptPanel } from '@/components/MeetingDetails/TranscriptPanel';
 import { SummaryPanel } from '@/components/MeetingDetails/SummaryPanel';
-import { AudioPlayer, AudioPlayerRef } from '@/components/AudioPlayer';
+import { AudioPlayerRef } from '@/components/AudioPlayer';
 import { SpeakerTagModal } from '@/components/SpeakerTagModal';
+import { MeetingDetailsSplitView, type MeetingDetailsTab } from '@/components/MeetingDetails/MeetingDetailsSplitView';
 import { ModelConfig } from '@/components/ModelSettingsModal';
 
 // Custom hooks
@@ -24,6 +25,7 @@ import { useNotes } from '@/hooks/useNotes';
 export default function PageContent({
   meeting,
   summaryData,
+  initialSummary,
   shouldAutoGenerate = false,
   onAutoGenerateComplete,
   onMeetingUpdated,
@@ -37,7 +39,8 @@ export default function PageContent({
   onLoadMore,
 }: {
   meeting: any;
-  summaryData: Summary | null;
+  summaryData: MeetingSummary | null;
+  initialSummary: SummaryProcessResponse | null;
   shouldAutoGenerate?: boolean;
   onAutoGenerateComplete?: () => void;
   onMeetingUpdated?: () => Promise<void>;
@@ -57,8 +60,9 @@ export default function PageContent({
   });
 
   // State
-  const [isRecording] = useState(false);
-  const [summaryResponse] = useState<SummaryResponse | null>(null);
+  const [customPrompt, setCustomPrompt] = useState<string>('');
+  const isRecording = false;
+  const [activeTab, setActiveTab] = useState<MeetingDetailsTab>('transcript');
 
   // Notes hook - persistent markdown notes for this meeting
   const notes = useNotes({ meetingId: meeting.id });
@@ -94,9 +98,6 @@ export default function PageContent({
         try {
           const saveSucceeded = await notes.saveNotes(savedMarkdown, blocks, recordingMeetingId);
           if (saveSucceeded) {
-            // FIXED: Don't clear sessionStorage here - let it persist so notes stay visible in the UI
-            // SessionStorage will be cleared when user starts a NEW recording (in useRecordingStart)
-            // This allows notes to remain visible even after recording completes and the meeting is saved
             console.log('✅ Recording notes persisted successfully to DB');
             console.log('📝 sessionStorage preserved for UI persistence - will be cleared on next recording');
           } else {
@@ -128,12 +129,15 @@ export default function PageContent({
 
   // Ref to store the modal open function from SummaryGeneratorButtonGroup
   const openModelSettingsRef = useRef<(() => void) | null>(null);
+  const autoSwitchedSummaryMeetingIdsRef = useRef(new Set<string>());
+  const manuallySelectedTabMeetingIdsRef = useRef(new Set<string>());
+  const autoGenerationStartedMeetingIdRef = useRef<string | null>(null);
 
   // Sidebar context
   const { serverAddress } = useSidebar();
 
   // Get model config and auto-update setting from ConfigContext
-  const { modelConfig, setModelConfig, autoUpdateMeetingName } = useConfig();
+  const { modelConfig, setModelConfig, isModelConfigLoading, autoUpdateMeetingName } = useConfig();
 
   // Custom hooks
   const meetingData = useMeetingData({ meeting, summaryData, onMeetingUpdated });
@@ -179,10 +183,11 @@ export default function PageContent({
   };
 
   const summaryGeneration = useSummaryGeneration({
+    initialSummary,
     meeting,
     transcripts: meetingData.transcripts,
     modelConfig: modelConfig,
-    isModelConfigLoading: false, // ConfigContext loads on mount
+    isModelConfigLoading,
     selectedTemplate: templates.selectedTemplate,
     onMeetingUpdated,
     updateMeetingTitle: meetingData.updateMeetingTitle,
@@ -468,113 +473,129 @@ export default function PageContent({
     });
   }, [segments, segmentSpeakerMap]);
 
-  // Auto-generate summary when flag is set
+  // Auto-switch to summary tab once summary is available
   useEffect(() => {
-    let cancelled = false;
+    if (
+      (meetingData.aiSummary || summaryGeneration.summaryStatus === 'completed')
+      && !autoSwitchedSummaryMeetingIdsRef.current.has(meeting.id)
+      && !manuallySelectedTabMeetingIdsRef.current.has(meeting.id)
+    ) {
+      autoSwitchedSummaryMeetingIdsRef.current.add(meeting.id);
+      setActiveTab('summary');
+    }
+  }, [meeting.id, meetingData.aiSummary, summaryGeneration.summaryStatus]);
 
-    const autoGenerate = async () => {
-      if (shouldAutoGenerate && meetingData.transcripts.length > 0 && !cancelled) {
-        console.log(`🤖 Auto-generating summary with ${modelConfig.provider}/${modelConfig.model}...`);
-        await summaryGeneration.handleGenerateSummary('');
+  // Auto-generate only after the model configuration has settled.
+  useEffect(() => {
+    if (
+      !shouldAutoGenerate
+      || summaryGeneration.summaryStatus !== 'idle'
+      || isModelConfigLoading
+      || meetingData.transcripts.length === 0
+      || autoGenerationStartedMeetingIdRef.current === meeting.id
+    ) {
+      return;
+    }
 
-        // Notify parent that auto-generation is complete (only if not cancelled)
-        if (onAutoGenerateComplete && !cancelled) {
-          onAutoGenerateComplete();
-        }
-      }
-    };
-
-    autoGenerate();
-
-    // Cleanup: cancel if component unmounts or meeting changes
-    return () => {
-      cancelled = true;
-    };
-  }, [shouldAutoGenerate, meeting.id]); // Re-run if meeting changes
+    autoGenerationStartedMeetingIdRef.current = meeting.id;
+    console.log(`🤖 Auto-generating summary with ${modelConfig.provider}/${modelConfig.model}...`);
+    onAutoGenerateComplete?.();
+    void summaryGeneration.handleGenerateSummary('');
+  }, [
+    shouldAutoGenerate,
+    meeting.id,
+    meetingData.transcripts.length,
+    isModelConfigLoading,
+    modelConfig.provider,
+    modelConfig.model,
+    summaryGeneration.handleGenerateSummary,
+    summaryGeneration.summaryStatus,
+    onAutoGenerateComplete,
+  ]);
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, ease: 'easeOut' }}
-      className="flex flex-col h-screen bg-gray-50"
+      className="flex flex-col h-screen min-w-0 bg-gray-50"
     >
-      <div className="flex flex-1 overflow-hidden">
-        <TranscriptPanel
-          transcripts={meetingData.transcripts}
-          onCopyTranscript={copyOperations.handleCopyTranscript}
-          onOpenMeetingFolder={meetingOperations.handleOpenMeetingFolder}
-          isRecording={isRecording}
-          disableAutoScroll={true}
-          // Pagination props for efficient loading
-          usePagination={true}
-          segments={enhancedSegments}
-          hasMore={hasMore}
-          isLoadingMore={isLoadingMore}
-          totalCount={totalCount}
-          loadedCount={loadedCount}
-          onLoadMore={onLoadMore}
-          // Audio playback props
-          onSegmentClick={audioFilePath ? handleSegmentClick : undefined}
-          currentPlaybackTime={currentPlaybackTime}
-          // Audio player
-          audioFilePath={audioFilePath}
-          audioPlayerRef={audioPlayerRef}
-          onAudioTimeUpdate={handleAudioTimeUpdate}
-          // Speaker enhancement props
-          onFullEnhance={handleFullEnhance}
-          onQuickLabel={handleQuickLabel}
-          onTagClick={handleTagClick}
-          isEnhancing={isEnhancing}
-          // Retranscription props
-          meetingId={meeting.id}
-          meetingFolderPath={meeting.folder_path}
-          hasAudioFile={!!audioFilePath}
-          onRefetchTranscripts={onRefetchTranscripts}
-        />
-        <SummaryPanel
-          meeting={meeting}
-          meetingTitle={meetingData.meetingTitle}
-          onTitleChange={meetingData.handleTitleChange}
-          isEditingTitle={meetingData.isEditingTitle}
-          onStartEditTitle={() => meetingData.setIsEditingTitle(true)}
-          onFinishEditTitle={() => meetingData.setIsEditingTitle(false)}
-          isTitleDirty={meetingData.isTitleDirty}
-          summaryRef={meetingData.blockNoteSummaryRef}
-          isSaving={meetingData.isSaving}
-          onSaveAll={meetingData.saveAllChanges}
-          onCopySummary={copyOperations.handleCopySummary}
-          onCopySummaryMarkdown={copyOperations.handleCopySummaryMarkdown}
-          onCopySummaryHTML={copyOperations.handleCopySummaryHTML}
-          onOpenFolder={meetingOperations.handleOpenMeetingFolder}
-          aiSummary={meetingData.aiSummary}
-          summaryStatus={summaryGeneration.summaryStatus}
-          transcripts={meetingData.transcripts}
-          modelConfig={modelConfig}
-          setModelConfig={setModelConfig}
-          onSaveModelConfig={handleSaveModelConfig}
-          onGenerateSummary={summaryGeneration.handleGenerateSummary}
-          onStopGeneration={summaryGeneration.handleStopGeneration}
-          customPrompt={notes.getNotesForPrompt()}
-          summaryResponse={summaryResponse}
-          onSaveSummary={meetingData.handleSaveSummary}
-          onSummaryChange={meetingData.handleSummaryChange}
-          onDirtyChange={meetingData.setIsSummaryDirty}
-          summaryError={summaryGeneration.summaryError}
-          onRegenerateSummary={summaryGeneration.handleRegenerateSummary}
-          getSummaryStatusMessage={summaryGeneration.getSummaryStatusMessage}
-          availableTemplates={templates.availableTemplates}
-          selectedTemplate={templates.selectedTemplate}
-          onTemplateSelect={templates.handleTemplateSelection}
-          isModelConfigLoading={false}
-          onOpenModelSettings={handleRegisterModalOpen}
-          // Notes props
-          notesMarkdown={notes.notesMarkdown}
-          notesBlocks={notes.notesBlocks}
-          notesIsLoading={notes.isLoading}
-          notesIsSaving={notes.isSaving}
-          notesIsDirty={notes.isDirty}
-          onNotesChange={notes.updateNotes}
+      <div className="flex flex-1 min-w-0 overflow-hidden">
+        <MeetingDetailsSplitView
+          activeTab={activeTab}
+          onTabChange={(tab) => {
+            manuallySelectedTabMeetingIdsRef.current.add(meeting.id);
+            setActiveTab(tab);
+          }}
+          transcript={
+            <TranscriptPanel
+              transcripts={meetingData.transcripts}
+              onCopyTranscript={copyOperations.handleCopyTranscript}
+              onOpenMeetingFolder={meetingOperations.handleOpenMeetingFolder}
+              isRecording={isRecording}
+              disableAutoScroll={true}
+              usePagination={true}
+              segments={enhancedSegments}
+              hasMore={hasMore}
+              isLoadingMore={isLoadingMore}
+              totalCount={totalCount}
+              loadedCount={loadedCount}
+              onLoadMore={onLoadMore}
+              onSegmentClick={audioFilePath ? handleSegmentClick : undefined}
+              currentPlaybackTime={currentPlaybackTime}
+              audioFilePath={audioFilePath}
+              audioPlayerRef={audioPlayerRef}
+              onAudioTimeUpdate={handleAudioTimeUpdate}
+              onFullEnhance={handleFullEnhance}
+              onQuickLabel={handleQuickLabel}
+              onTagClick={handleTagClick}
+              isEnhancing={isEnhancing}
+              meetingId={meeting.id}
+              meetingFolderPath={meeting.folder_path}
+              hasAudioFile={!!audioFilePath}
+              onRefetchTranscripts={onRefetchTranscripts}
+            />
+          }
+          summary={
+            <SummaryPanel
+              meeting={meeting}
+              meetingTitle={meetingData.meetingTitle}
+              summaryRef={meetingData.blockNoteSummaryRef}
+              isSaving={meetingData.isSaving}
+              isSummaryDirty={meetingData.isSummaryDirty}
+              onSaveAll={meetingData.saveAllChanges}
+              onCopySummary={copyOperations.handleCopySummary}
+              onCopySummaryMarkdown={copyOperations.handleCopySummaryMarkdown}
+              onCopySummaryHTML={copyOperations.handleCopySummaryHTML}
+              onOpenFolder={meetingOperations.handleOpenMeetingFolder}
+              aiSummary={meetingData.aiSummary}
+              summaryStatus={summaryGeneration.summaryStatus}
+              transcripts={meetingData.transcripts}
+              modelConfig={modelConfig}
+              setModelConfig={setModelConfig}
+              onSaveModelConfig={handleSaveModelConfig}
+              onGenerateSummary={summaryGeneration.handleGenerateSummary}
+              onStopGeneration={summaryGeneration.handleStopGeneration}
+              customPrompt={notes.getNotesForPrompt() || customPrompt}
+              onSaveSummary={meetingData.handleSaveSummary}
+              onSummaryChange={meetingData.handleSummaryChange}
+              onDirtyChange={meetingData.setIsSummaryDirty}
+              summaryError={summaryGeneration.summaryError}
+              onRegenerateSummary={summaryGeneration.handleRegenerateSummary}
+              getSummaryStatusMessage={summaryGeneration.getSummaryStatusMessage}
+              availableTemplates={templates.availableTemplates}
+              selectedTemplate={templates.selectedTemplate}
+              onTemplateSelect={templates.handleTemplateSelection}
+              isModelConfigLoading={isModelConfigLoading}
+              onOpenModelSettings={handleRegisterModalOpen}
+              notesMarkdown={notes.notesMarkdown}
+              notesBlocks={notes.notesBlocks}
+              notesIsLoading={notes.isLoading}
+              notesIsSaving={notes.isSaving}
+              notesIsDirty={notes.isDirty}
+              onNotesChange={notes.updateNotes}
+            />
+          }
         />
       </div>
       

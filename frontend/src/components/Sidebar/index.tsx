@@ -963,7 +963,7 @@ const Sidebar: React.FC = () => {
             </button>
             <Info isCollapsed={isCollapsed} />
             <div className="w-full flex items-center justify-center px-3 py-1 text-xs text-gray-400">
-              {appVersion ? `v${appVersion}` : ''}
+              {appVersion ? `v${appVersion}` : 'v0.4.1'}
             </div>
           </div>
         )}

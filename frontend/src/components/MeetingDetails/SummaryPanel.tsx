@@ -1,8 +1,7 @@
 "use client";
 
-import { useState, useCallback, useEffect } from 'react';
-import { Summary, SummaryResponse, Transcript } from '@/types';
-import { EditableTitle } from '@/components/EditableTitle';
+import { useEffect, useRef, useState, useCallback, RefObject } from 'react';
+import { MeetingSummary, Summary, Transcript } from '@/types';
 import { BlockNoteSummaryView, BlockNoteSummaryViewRef } from '@/components/AISummary/BlockNoteSummaryView';
 import { EmptyStateSummary } from '@/components/EmptyStateSummary';
 import { ModelConfig } from '@/components/ModelSettingsModal';
@@ -19,17 +18,26 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { Block } from '@blocknote/core';
+import { FileText, Sparkles, Loader2, Languages, ChevronDown } from 'lucide-react';
+import Analytics from '@/lib/analytics';
+import { toast } from 'sonner';
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
+import { LanguagePickerPopover } from '@/components/LanguagePickerPopover';
+import { useRecentLanguages } from '@/hooks/useRecentLanguages';
+import { labelForCode } from '@/lib/summary-languages';
+import {
+  readMeetingSummaryLanguage,
+  saveMeetingSummaryLanguage,
+  SummaryLanguageStorage,
+} from '@/lib/summary-language-preferences';
+import { hasVisibleSummaryContent } from '@/lib/summary-content';
 
 // Dynamic import to avoid SSR issues - BlockNote requires `document`
 const NotesEditor = dynamic(
   () => import('@/components/NotesEditor').then(mod => mod.NotesEditor),
   { ssr: false, loading: () => <div className="p-4 text-gray-400 text-sm">Loading editor...</div> }
 );
-import { Block } from '@blocknote/core';
-import { FileText, Sparkles, Loader2 } from 'lucide-react';
-import Analytics from '@/lib/analytics';
-import { RefObject } from 'react';
-import { toast } from 'sonner';
 
 interface SummaryPanelProps {
   meeting: {
@@ -38,19 +46,15 @@ interface SummaryPanelProps {
     created_at: string;
   };
   meetingTitle: string;
-  onTitleChange: (title: string) => void;
-  isEditingTitle: boolean;
-  onStartEditTitle: () => void;
-  onFinishEditTitle: () => void;
-  isTitleDirty: boolean;
+  isSummaryDirty?: boolean;
   summaryRef: RefObject<BlockNoteSummaryViewRef>;
   isSaving: boolean;
   onSaveAll: () => Promise<void>;
   onCopySummary: () => Promise<void>;
   onCopySummaryMarkdown?: () => Promise<void>;
   onCopySummaryHTML?: () => Promise<void>;
-  onOpenFolder: () => Promise<void>;
-  aiSummary: Summary | null;
+  onOpenFolder?: () => Promise<void>;
+  aiSummary: MeetingSummary | null;
   summaryStatus: 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
   transcripts: Transcript[];
   modelConfig: ModelConfig;
@@ -59,18 +63,24 @@ interface SummaryPanelProps {
   onGenerateSummary: (customPrompt: string) => Promise<void>;
   onStopGeneration: () => void;
   customPrompt: string;
-  summaryResponse: SummaryResponse | null;
-  onSaveSummary: (summary: Summary | { markdown?: string; summary_json?: any[] }) => Promise<void>;
-  onSummaryChange: (summary: Summary) => void;
+  onSaveSummary: (summary: MeetingSummary) => Promise<void>;
+  onSummaryChange: (summary: MeetingSummary) => void;
   onDirtyChange: (isDirty: boolean) => void;
   summaryError: string | null;
   onRegenerateSummary: () => Promise<void>;
   getSummaryStatusMessage: (status: 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error') => string;
-  availableTemplates: Array<{ id: string, name: string, description: string }>;
+  availableTemplates: Array<{ id: string; name: string; description: string }>;
   selectedTemplate: string;
   onTemplateSelect: (templateId: string, templateName: string) => void;
   isModelConfigLoading?: boolean;
   onOpenModelSettings?: (openFn: () => void) => void;
+  // Title editing & dirty state props (optional)
+  onTitleChange?: (title: string) => void;
+  isEditingTitle?: boolean;
+  onStartEditTitle?: () => void;
+  onFinishEditTitle?: () => void;
+  isTitleDirty?: boolean;
+
   // Notes props
   notesMarkdown?: string;
   notesBlocks?: Block[] | null;
@@ -85,11 +95,7 @@ interface SummaryPanelProps {
 export function SummaryPanel({
   meeting,
   meetingTitle,
-  onTitleChange,
-  isEditingTitle,
-  onStartEditTitle,
-  onFinishEditTitle,
-  isTitleDirty,
+  isSummaryDirty = false,
   summaryRef,
   isSaving,
   onSaveAll,
@@ -106,7 +112,6 @@ export function SummaryPanel({
   onGenerateSummary,
   onStopGeneration,
   customPrompt,
-  summaryResponse,
   onSaveSummary,
   onSummaryChange,
   onDirtyChange,
@@ -118,6 +123,7 @@ export function SummaryPanel({
   onTemplateSelect,
   isModelConfigLoading = false,
   onOpenModelSettings,
+  isTitleDirty = false,
   notesMarkdown = '',
   notesBlocks = null,
   notesIsLoading = false,
@@ -126,7 +132,134 @@ export function SummaryPanel({
   onNotesChange,
   summaryControlsDisabled = false,
 }: SummaryPanelProps) {
+  const [summaryLang, setSummaryLang] = useState<string | null>(null);
+  const [summaryLangStorage, setSummaryLangStorage] = useState<SummaryLanguageStorage>('metadata');
+  const [langPickerOpen, setLangPickerOpen] = useState(false);
+  const languageLoadVersionRef = useRef(0);
+  const activeMeetingIdRef = useRef(meeting.id);
+  const languageSaveVersionRef = useRef(0);
+  const languageSaveLoopRunningRef = useRef(false);
+  const latestLanguageSaveRequestRef = useRef<{
+    version: number;
+    meetingId: string;
+    language: string | null;
+    rollback: {
+      language: string | null;
+      storage: SummaryLanguageStorage;
+    };
+  } | null>(null);
+  activeMeetingIdRef.current = meeting.id;
+  const { addRecent } = useRecentLanguages();
+
+  const effectiveLangLabel = summaryLang ? labelForCode(summaryLang) : 'Auto';
+  const isLocalFallbackLanguage = summaryLangStorage === 'local_fallback';
+  const autoSubtitle = isLocalFallbackLanguage
+    ? 'Saved on this device for folderless meetings'
+    : 'Uses dominant transcript language';
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadVersion = languageLoadVersionRef.current + 1;
+    languageLoadVersionRef.current = loadVersion;
+
+    const loadSummaryLanguage = async () => {
+      try {
+        const stored = await readMeetingSummaryLanguage(meeting.id);
+        if (!cancelled && languageLoadVersionRef.current === loadVersion) {
+          setSummaryLang(stored.language);
+          setSummaryLangStorage(stored.storage);
+        }
+      } catch (err) {
+        console.error('Failed to load summary language:', err);
+        toast.warning('Could not load saved summary language', {
+          description: 'Using Auto until meeting metadata can be read.',
+        });
+        if (!cancelled && languageLoadVersionRef.current === loadVersion) setSummaryLang(null);
+      }
+    };
+
+    loadSummaryLanguage();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [meeting.id]);
+
+  const persistLatestLanguageSelection = async () => {
+    if (languageSaveLoopRunningRef.current) return;
+    languageSaveLoopRunningRef.current = true;
+
+    try {
+      while (true) {
+        const request = latestLanguageSaveRequestRef.current;
+        if (!request) return;
+
+        try {
+          const saved = await saveMeetingSummaryLanguage(request.meetingId, request.language);
+          const latest = latestLanguageSaveRequestRef.current;
+          if (
+            latest?.version === request.version &&
+            activeMeetingIdRef.current === request.meetingId
+          ) {
+            setSummaryLang(saved.language);
+            setSummaryLangStorage(saved.storage);
+            if (saved.storage === 'local_fallback') {
+              toast.info('Summary language saved on this device', {
+                description: 'This meeting has no recording folder, so the preference cannot be written to meeting metadata.',
+              });
+            }
+            if (request.language) {
+              addRecent(request.language);
+            }
+            return;
+          }
+
+          if (latest?.version === request.version) return;
+        } catch (err) {
+          const latest = latestLanguageSaveRequestRef.current;
+          if (
+            latest?.version === request.version &&
+            activeMeetingIdRef.current === request.meetingId
+          ) {
+            console.error('Failed to persist summary language:', err);
+            toast.error('Failed to save summary language');
+            setSummaryLang(request.rollback.language);
+            setSummaryLangStorage(request.rollback.storage);
+            return;
+          }
+
+          console.warn('Ignoring failed stale summary language save:', err);
+          if (latest?.version === request.version) return;
+        }
+      }
+    } finally {
+      languageSaveLoopRunningRef.current = false;
+    }
+  };
+
+  const handleLangChange = (code: string | null) => {
+    const previous = summaryLang;
+    const previousStorage = summaryLangStorage;
+    const nextStored = code;
+    languageLoadVersionRef.current += 1;
+    latestLanguageSaveRequestRef.current = {
+      version: languageSaveVersionRef.current + 1,
+      meetingId: meeting.id,
+      language: nextStored,
+      rollback: {
+        language: previous,
+        storage: previousStorage,
+      },
+    };
+    languageSaveVersionRef.current += 1;
+    setSummaryLang(nextStored);
+    setLangPickerOpen(false);
+    void persistLatestLanguageSelection();
+  };
+
   const isSummaryLoading = summaryStatus === 'processing' || summaryStatus === 'summarizing' || summaryStatus === 'regenerating';
+  const hasSummary = hasVisibleSummaryContent(aiSummary);
+
   const [activeTab, setActiveTab] = useState<string>('notes');
   const [isOverwriteConfirmOpen, setIsOverwriteConfirmOpen] = useState(false);
   const [isGeneratePendingConfirm, setIsGeneratePendingConfirm] = useState(false);
@@ -149,42 +282,8 @@ export function SummaryPanel({
   };
 
   const hasExistingSummaryContent = useCallback(() => {
-    const summaryData = aiSummary as any;
-
-    if (summaryData) {
-      if (typeof summaryData.markdown === 'string' && summaryData.markdown.trim().length > 0) {
-        return true;
-      }
-
-      if (Array.isArray(summaryData.summary_json) && summaryData.summary_json.length > 0) {
-        return true;
-      }
-
-      const hasLegacySections = Object.entries(summaryData).some(([key, section]) => {
-        if (key === '_section_order' || key === 'MeetingName') {
-          return false;
-        }
-
-        if (!section || typeof section !== 'object') {
-          return false;
-        }
-
-        const sectionData = section as { blocks?: unknown[] };
-        return Array.isArray(sectionData.blocks) && sectionData.blocks.length > 0;
-      });
-
-      if (hasLegacySections) {
-        return true;
-      }
-    }
-
-    if (summaryRef.current?.isDirty) {
-      return true;
-    }
-
-    const responseSummary = summaryResponse?.summary as Record<string, unknown> | undefined;
-    return !!responseSummary && Object.keys(responseSummary).length > 0;
-  }, [aiSummary, summaryRef, summaryResponse]);
+    return hasVisibleSummaryContent(aiSummary) || (summaryRef.current?.isDirty ?? false);
+  }, [aiSummary, summaryRef]);
 
   const runGenerateSummary = useCallback(async () => {
     await onGenerateSummary(customPrompt);
@@ -265,7 +364,7 @@ export function SummaryPanel({
         return;
       }
 
-      // For notes, also convert to HTML format
+      // For notes, convert to rich HTML format
       const { generateRichHTML, copyHtmlToClipboard } = await import('@/lib/markdown-to-html');
       const htmlContent = generateRichHTML(notesMarkdown, 'Notes', {
         meetingId: meeting.id,
@@ -274,15 +373,15 @@ export function SummaryPanel({
           month: 'long',
           day: 'numeric',
           hour: '2-digit',
-          minute: '2-digit'
+          minute: '2-digit',
         }),
         copiedOn: new Date().toLocaleDateString('en-US', {
           year: 'numeric',
           month: 'long',
           day: 'numeric',
           hour: '2-digit',
-          minute: '2-digit'
-        })
+          minute: '2-digit',
+        }),
       });
 
       await copyHtmlToClipboard(htmlContent, notesMarkdown);
@@ -297,7 +396,34 @@ export function SummaryPanel({
     }
   }, [activeTab, notesMarkdown, meeting, onCopySummary, onCopySummaryHTML]);
 
-  // Shared button group for summary generator - always visible
+  const languageSlot = (
+    <Popover open={langPickerOpen} onOpenChange={setLangPickerOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          size="sm"
+          title={`Summary language: ${effectiveLangLabel}${isLocalFallbackLanguage ? ' (saved on this device)' : ''}`}
+          aria-label="Set summary language"
+        >
+          <Languages size={18} />
+          <span className="hidden @[40rem]:inline">{effectiveLangLabel}</span>
+          <ChevronDown size={14} className="text-gray-400" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="end"
+        className="w-auto p-0 border-0 shadow-none bg-transparent"
+      >
+        <LanguagePickerPopover
+          value={summaryLang}
+          onChange={handleLangChange}
+          onClose={() => setLangPickerOpen(false)}
+          autoSubtitle={autoSubtitle}
+        />
+      </PopoverContent>
+    </Popover>
+  );
+
   const summaryButtonGroup = (
     <SummaryGeneratorButtonGroup
       modelConfig={modelConfig}
@@ -311,13 +437,15 @@ export function SummaryPanel({
       selectedTemplate={selectedTemplate}
       onTemplateSelect={onTemplateSelect}
       hasTranscripts={!summaryControlsDisabled && transcripts.length > 0}
+      hasSummary={hasSummary}
       isModelConfigLoading={isModelConfigLoading}
       onOpenModelSettings={onOpenModelSettings}
+      languageSlot={transcripts.length > 0 || hasSummary ? languageSlot : undefined}
     />
   );
 
   return (
-    <div className="flex-1 min-w-0 flex flex-col bg-white overflow-hidden">
+    <div className="flex-1 min-w-0 flex flex-col bg-white overflow-hidden h-full w-full @container">
       <Dialog open={isOverwriteConfirmOpen} onOpenChange={handleOverwriteDialogOpenChange}>
         <DialogContent>
           <DialogHeader>
@@ -340,7 +468,7 @@ export function SummaryPanel({
       <Tabs value={activeTab} onValueChange={handleTabChange} className="flex flex-col h-full">
         {/* Tab header area with controls */}
         <div className="border-b border-gray-200">
-          <div className="flex items-center justify-between gap-2 px-3 pt-3 pb-0">
+          <div className="flex items-center justify-between gap-2 px-3 pt-3 pb-2 flex-wrap">
             <TabsList className="bg-gray-100/80 flex-shrink-0">
               <TabsTrigger value="notes" className="flex items-center gap-1.5 text-sm">
                 <FileText size={14} />
@@ -359,12 +487,12 @@ export function SummaryPanel({
               </TabsTrigger>
             </TabsList>
 
-            {/* Summary controls - always visible */}
-            <div className="flex items-center gap-1 pb-2 flex-shrink min-w-0 flex-wrap justify-end">
+            {/* Summary & updater controls */}
+            <div className="flex items-center gap-1 flex-shrink min-w-0 flex-wrap justify-end">
               <div className="flex-shrink-0">
                 <SummaryUpdaterButtonGroup
                   isSaving={isSaving}
-                  isDirty={isTitleDirty || (summaryRef.current?.isDirty || false) || notesIsDirty}
+                  isDirty={isTitleDirty || isSummaryDirty || (summaryRef.current?.isDirty || false) || notesIsDirty}
                   onSave={onSaveAll}
                   onCopy={handleCopyActiveTab}
                   onCopyMarkdown={handleCopyActiveTabMarkdown}
@@ -373,7 +501,7 @@ export function SummaryPanel({
                     console.log('Find in summary clicked');
                   }}
                   onOpenFolder={onOpenFolder}
-                  hasSummary={activeTab === 'notes' ? notesMarkdown.trim().length > 0 : !!aiSummary}
+                  hasSummary={activeTab === 'notes' ? notesMarkdown.trim().length > 0 : hasSummary}
                 />
               </div>
               <div className="flex-shrink-0">
@@ -408,71 +536,23 @@ export function SummaryPanel({
         {/* Summary Tab Content */}
         <TabsContent value="summary" className="flex-1 overflow-hidden min-h-0 m-0 data-[state=inactive]:hidden">
           {isSummaryLoading ? (
-            <div className="flex flex-col h-full">
-              {/* Loading spinner */}
-              <div className="flex items-center justify-center flex-1">
-                <div className="text-center">
-                  <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mb-4"></div>
-                  <p className="text-gray-600">Generating AI Summary...</p>
-                </div>
+            <div className="flex items-center justify-center flex-1 h-full">
+              <div className="text-center">
+                <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mb-4"></div>
+                <p className="text-gray-600">Generating AI Summary...</p>
               </div>
             </div>
-          ) : !aiSummary ? (
+          ) : !hasSummary ? (
             <div className="flex flex-col h-full">
-              {/* Empty state message */}
               <EmptyStateSummary
                 onGenerate={handleGenerateSummaryWithConfirm}
                 hasModel={modelConfig.provider !== null && modelConfig.model !== null}
                 isGenerating={isSummaryLoading}
+                error={summaryError}
               />
             </div>
-          ) : transcripts?.length > 0 && (
+          ) : (
             <div className="flex-1 h-full overflow-y-auto min-h-0 custom-scrollbar">
-              {summaryResponse && (
-                <div className="bg-gray-50 border-b border-gray-200 p-4 max-h-[33vh] overflow-y-auto">
-                  <h3 className="text-lg font-semibold mb-2">Meeting Summary</h3>
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                    <div className="bg-white p-4 rounded-lg shadow-sm">
-                      <h4 className="font-medium mb-1">Key Points</h4>
-                      <ul className="list-disc pl-4">
-                        {summaryResponse.summary.key_points.blocks.map((block, i) => (
-                          <li key={i} className="text-sm">{block.content}</li>
-                        ))}
-                      </ul>
-                    </div>
-                    <div className="bg-white p-4 rounded-lg shadow-sm mt-4">
-                      <h4 className="font-medium mb-1">Action Items</h4>
-                      <ul className="list-disc pl-4">
-                        {summaryResponse.summary.action_items.blocks.map((block, i) => (
-                          <li key={i} className="text-sm">{block.content}</li>
-                        ))}
-                      </ul>
-                    </div>
-                    <div className="bg-white p-4 rounded-lg shadow-sm mt-4">
-                      <h4 className="font-medium mb-1">Decisions</h4>
-                      <ul className="list-disc pl-4">
-                        {summaryResponse.summary.decisions.blocks.map((block, i) => (
-                          <li key={i} className="text-sm">{block.content}</li>
-                        ))}
-                      </ul>
-                    </div>
-                    <div className="bg-white p-4 rounded-lg shadow-sm mt-4">
-                      <h4 className="font-medium mb-1">Main Topics</h4>
-                      <ul className="list-disc pl-4">
-                        {summaryResponse.summary.main_topics.blocks.map((block, i) => (
-                          <li key={i} className="text-sm">{block.content}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  </div>
-                  {summaryResponse.raw_summary ? (
-                    <div className="mt-4">
-                      <h4 className="font-medium mb-1">Full Summary</h4>
-                      <p className="text-sm whitespace-pre-wrap">{summaryResponse.raw_summary}</p>
-                    </div>
-                  ) : null}
-                </div>
-              )}
               <div className="p-6 w-full">
                 <BlockNoteSummaryView
                   ref={summaryRef}
@@ -489,7 +569,7 @@ export function SummaryPanel({
                   meeting={{
                     id: meeting.id,
                     title: meetingTitle,
-                    created_at: meeting.created_at
+                    created_at: meeting.created_at,
                   }}
                 />
               </div>

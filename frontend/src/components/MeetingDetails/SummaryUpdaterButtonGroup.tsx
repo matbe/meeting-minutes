@@ -8,7 +8,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Copy, Save, Loader2, Search, FolderOpen, ChevronDown } from 'lucide-react';
+import { Copy, Save, Loader2, ChevronDown } from 'lucide-react';
 import Analytics from '@/lib/analytics';
 
 interface SummaryUpdaterButtonGroupProps {
@@ -16,11 +16,11 @@ interface SummaryUpdaterButtonGroupProps {
   isDirty: boolean;
   onSave: () => Promise<void>;
   onCopy: () => Promise<void>;
-  onCopyMarkdown: () => Promise<void>;
-  onCopyHTML: () => Promise<void>;
+  onCopyMarkdown?: () => Promise<void>;
+  onCopyHTML?: () => Promise<void>;
   onFind?: () => void;
-  onOpenFolder: () => Promise<void>;
-  hasSummary: boolean;
+  onOpenFolder?: () => Promise<void>;
+  hasSummary?: boolean;
 }
 
 export function SummaryUpdaterButtonGroup({
@@ -30,9 +30,7 @@ export function SummaryUpdaterButtonGroup({
   onCopy,
   onCopyMarkdown,
   onCopyHTML,
-  onFind,
-  onOpenFolder,
-  hasSummary
+  hasSummary = true,
 }: SummaryUpdaterButtonGroupProps) {
   return (
     <ButtonGroup>
@@ -40,8 +38,8 @@ export function SummaryUpdaterButtonGroup({
       <Button
         variant="outline"
         size="sm"
-        className={`${isDirty ? 'bg-green-200' : ""}`}
-        title={isSaving ? "Saving" : "Save Changes"}
+        className={`${isDirty ? 'bg-green-200' : ''}`}
+        title={isSaving ? 'Saving' : 'Save Changes'}
         onClick={() => {
           Analytics.trackButtonClick('save_changes', 'meeting_details');
           onSave();
@@ -51,68 +49,67 @@ export function SummaryUpdaterButtonGroup({
         {isSaving ? (
           <>
             <Loader2 className="animate-spin" />
-            <span className="hidden xl:inline">Saving...</span>
+            <span className="hidden @[40rem]:inline">Saving...</span>
           </>
         ) : (
           <>
             <Save />
-            <span className="hidden xl:inline">Save</span>
+            <span className="hidden @[40rem]:inline">Save</span>
           </>
         )}
       </Button>
 
       {/* Copy button with dropdown */}
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="outline"
-            size="sm"
-            title="Copy Summary"
-            disabled={!hasSummary}
-            className="cursor-pointer flex items-center gap-1"
-          >
-            <Copy className="w-4 h-4" />
-            <span className="hidden xl:inline">Copy</span>
-            <ChevronDown className="w-3 h-3 opacity-50" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem
-            onClick={() => {
-              Analytics.trackButtonClick('copy_summary_markdown', 'meeting_details');
-              onCopyMarkdown();
-            }}
-          >
-            <span>Copy Markdown</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            onClick={() => {
-              Analytics.trackButtonClick('copy_summary_html', 'meeting_details');
-              onCopyHTML();
-            }}
-          >
-            <span>Copy HTML</span>
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-
-      {/* Find button */}
-      {/* {onFind && (
+      {onCopyMarkdown && onCopyHTML ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="outline"
+              size="sm"
+              title="Copy Summary"
+              disabled={!hasSummary}
+              className="cursor-pointer flex items-center gap-1"
+            >
+              <Copy className="w-4 h-4" />
+              <span className="hidden @[40rem]:inline">Copy</span>
+              <ChevronDown className="w-3 h-3 opacity-50" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem
+              onClick={() => {
+                Analytics.trackButtonClick('copy_summary_markdown', 'meeting_details');
+                onCopyMarkdown();
+              }}
+            >
+              <span>Copy Markdown</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => {
+                Analytics.trackButtonClick('copy_summary_html', 'meeting_details');
+                onCopyHTML();
+              }}
+            >
+              <span>Copy HTML</span>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : (
         <Button
           variant="outline"
           size="sm"
-          title="Find in Summary"
-          onClick={() => {
-            Analytics.trackButtonClick('find_in_summary', 'meeting_details');
-            onFind();
-          }}
+          title="Copy Summary"
           disabled={!hasSummary}
+          onClick={() => {
+            Analytics.trackButtonClick('copy_summary', 'meeting_details');
+            onCopy();
+          }}
           className="cursor-pointer"
         >
-          <Search />
-          <span className="hidden lg:inline">Find</span>
+          <Copy />
+          <span className="hidden @[40rem]:inline">Copy</span>
         </Button>
-      )} */}
+      )}
     </ButtonGroup>
   );
 }

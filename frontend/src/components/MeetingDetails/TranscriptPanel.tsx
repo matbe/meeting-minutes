@@ -1,7 +1,6 @@
 "use client";
 
 import { Transcript, TranscriptSegmentData } from '@/types';
-import { TranscriptView } from '@/components/TranscriptView';
 import { VirtualizedTranscriptView } from '@/components/VirtualizedTranscriptView';
 import { TranscriptButtonGroup } from './TranscriptButtonGroup';
 import { AudioPlayer, AudioPlayerRef } from '@/components/AudioPlayer';
@@ -26,12 +25,12 @@ interface TranscriptPanelProps {
   // Audio playback props
   onSegmentClick?: (audioStartTime: number) => void;
   currentPlaybackTime?: number;
-  
+
   // Audio player props
   audioFilePath?: string | null;
   audioPlayerRef?: Ref<AudioPlayerRef>;
   onAudioTimeUpdate?: (time: number) => void;
-  
+
   // Speaker enhancement props
   onFullEnhance?: () => void;
   onQuickLabel?: () => void;
@@ -69,7 +68,6 @@ export function TranscriptPanel({
   isEnhancing = false,
   meetingId,
   meetingFolderPath,
-  hasAudioFile = true,
   onRefetchTranscripts,
 }: TranscriptPanelProps) {
   // Convert transcripts to segments if pagination is not used but we want virtualization
@@ -90,7 +88,7 @@ export function TranscriptPanel({
   }, [transcripts, usePagination, segments]);
 
   return (
-    <div className="hidden md:flex md:w-1/4 lg:w-1/3 min-w-[250px] border-r border-gray-200 bg-white flex-col relative">
+    <div className="flex h-full min-w-0 w-full bg-white flex-col relative @container">
       {/* Title area */}
       <div className="p-3 border-b border-gray-200">
         <TranscriptButtonGroup

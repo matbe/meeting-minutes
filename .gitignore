@@ -75,7 +75,5 @@ node_modules/
 experiments/
 .cursor/
 target/
-
 frontend/src-tauri/binaries/
-Cargo.lock
 .github/copilot-instructions.md

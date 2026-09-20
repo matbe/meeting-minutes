@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { motion } from 'framer-motion';
 import { RecordingControls } from '@/components/RecordingControls';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { usePermissionCheck } from '@/hooks/usePermissionCheck';
@@ -290,12 +289,7 @@ export default function Home() {
   const isProcessingStop = status === RecordingStatus.PROCESSING_TRANSCRIPTS || isProcessing;
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3, ease: 'easeOut' }}
-      className="flex flex-col h-screen bg-gray-50"
-    >
+    <div className="flex flex-col h-screen bg-gray-50">
       {/* All Modals supported*/}
       <SettingsModals
         modals={modals}
@@ -333,6 +327,7 @@ export default function Home() {
             onStartEditTitle={() => {}}
             onFinishEditTitle={() => {}}
             isTitleDirty={false}
+            isSummaryDirty={false}
             summaryRef={{ current: null } as any}
             isSaving={false}
             onSaveAll={async () => {}}
@@ -352,7 +347,6 @@ export default function Home() {
             onGenerateSummary={async () => {}}
             onStopGeneration={() => {}}
             customPrompt=""
-            summaryResponse={null}
             onSaveSummary={async () => {}}
             onSummaryChange={() => {}}
             onDirtyChange={() => {}}
@@ -419,6 +413,6 @@ export default function Home() {
           sidebarCollapsed={sidebarCollapsed}
         />
       </div>
-    </motion.div>
+    </div>
   );
 }

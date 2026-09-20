@@ -5,6 +5,7 @@ import Analytics from '@/lib/analytics';
 import { load } from '@tauri-apps/plugin-store';
 import { getVersion } from '@tauri-apps/api/app';
 
+const ANALYTICS_DEFAULT_OFF_MIGRATION_KEY = 'analyticsDefaultOffMigrationV1';
 
 interface AnalyticsProviderProps {
   children: ReactNode;
@@ -16,12 +17,12 @@ interface AnalyticsContextType {
 }
 
 export const AnalyticsContext = createContext<AnalyticsContextType>({
-  isAnalyticsOptedIn: true,
+  isAnalyticsOptedIn: false,
   setIsAnalyticsOptedIn: () => { },
 });
 
 export default function AnalyticsProvider({ children }: AnalyticsProviderProps) {
-  const [isAnalyticsOptedIn, setIsAnalyticsOptedIn] = useState(true);
+  const [isAnalyticsOptedIn, setIsAnalyticsOptedIn] = useState(false);
   const initialized = useRef(false);
 
   useEffect(() => {
@@ -34,18 +35,28 @@ export default function AnalyticsProvider({ children }: AnalyticsProviderProps) 
       const store = await load('analytics.json', {
         autoSave: false,
         defaults: {
-          analyticsOptedIn: true
+          analyticsOptedIn: false
         }
       });
+
       if (!(await store.has('analyticsOptedIn'))) {
-        await store.set('analyticsOptedIn', true);
+        await store.set('analyticsOptedIn', false);
       }
-      const analyticsOptedIn = await store.get('analyticsOptedIn')
+
+      let analyticsOptedIn = await store.get<boolean>('analyticsOptedIn');
+      if (!(await store.has(ANALYTICS_DEFAULT_OFF_MIGRATION_KEY))) {
+        analyticsOptedIn = false;
+        await store.set('analyticsOptedIn', false);
+        await store.set(ANALYTICS_DEFAULT_OFF_MIGRATION_KEY, true);
+        await store.save();
+      } else if (analyticsOptedIn !== true) {
+        analyticsOptedIn = false;
+      }
 
       setIsAnalyticsOptedIn(analyticsOptedIn as boolean);
       // Fix: Use fresh value from store, not stale state
       if (analyticsOptedIn) {
-        initAnalytics2();
+        await initAnalytics2();
       }
     }
 
@@ -67,7 +78,7 @@ export default function AnalyticsProvider({ children }: AnalyticsProviderProps) 
       const store = await load('analytics.json', {
         autoSave: false,
         defaults: {
-          analyticsOptedIn: true
+          analyticsOptedIn: false
         }
       });
       await store.set('platform', deviceInfo.platform);
@@ -89,7 +100,6 @@ export default function AnalyticsProvider({ children }: AnalyticsProviderProps) 
         os_version: deviceInfo.os_version,
         architecture: deviceInfo.architecture,
         first_seen: new Date().toISOString(),
-        user_agent: navigator.userAgent,
       });
 
       // Start analytics session with platform info
@@ -140,4 +150,4 @@ export default function AnalyticsProvider({ children }: AnalyticsProviderProps) 
   }, [isAnalyticsOptedIn]);
 
   return <AnalyticsContext.Provider value={{ isAnalyticsOptedIn, setIsAnalyticsOptedIn }}>{children}</AnalyticsContext.Provider>;
-} 
+}

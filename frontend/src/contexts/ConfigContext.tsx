@@ -46,6 +46,7 @@ interface ConfigContextType {
   // Model configuration
   modelConfig: ModelConfig;
   setModelConfig: (config: ModelConfig | ((prev: ModelConfig) => ModelConfig)) => void;
+  isModelConfigLoading: boolean;
 
   // Transcript model configuration
   transcriptModelConfig: TranscriptModelProps;
@@ -110,6 +111,8 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     whisperModel: 'large-v3',
     ollamaEndpoint: null
   });
+  const [isModelConfigLoading, setIsModelConfigLoading] = useState(true);
+
 
   // Transcript model configuration state
   const [transcriptModelConfig, setTranscriptModelConfig] = useState<TranscriptModelProps>({
@@ -184,7 +187,6 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     }
     return false;
   });
-
   // Beta features state (localStorage)
   const [betaFeatures, setBetaFeatures] = useState<BetaFeatures>(() => {
     return loadBetaFeatures();
@@ -308,6 +310,8 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
         }
       } catch (error) {
         console.error('Failed to fetch saved model config in ConfigContext:', error);
+      } finally {
+        setIsModelConfigLoading(false);
       }
     };
     fetchModelConfig();
@@ -424,7 +428,6 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
       localStorage.setItem('disableStartupCommunication', checked.toString());
     }
   }, [])
-
   // Toggle beta feature with localStorage persistence and analytics
   const toggleBetaFeature = useCallback((featureKey: BetaFeatureKey, enabled: boolean) => {
     setBetaFeatures(prev => {
@@ -521,6 +524,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   const value: ConfigContextType = useMemo(() => ({
     modelConfig,
     setModelConfig,
+    isModelConfigLoading,
     isAutoSummary,
     toggleIsAutoSummary,
     autoUpdateMeetingName,
@@ -549,6 +553,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     updateNotificationSettings,
   }), [
     modelConfig,
+    isModelConfigLoading,
     isAutoSummary,
     toggleIsAutoSummary,
     autoUpdateMeetingName,
